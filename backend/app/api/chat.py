@@ -46,10 +46,14 @@ async def chat_stream(
 
     # Get or create conversation
     if body.conversation_id:
+        from app.models.conversation_share import ConversationShare
         result = await db.execute(
             select(Conversation).where(
-                Conversation.id == body.conversation_id,
-                Conversation.user_id == user.id,
+                (Conversation.id == body.conversation_id) &
+                ((Conversation.user_id == user.id) |
+                 Conversation.id.in_(
+                     select(ConversationShare.conversation_id).where(ConversationShare.user_id == user.id)
+                 ))
             )
         )
         conversation = result.scalar_one_or_none()
@@ -73,16 +77,25 @@ async def chat_stream(
         parent_message_id=body.parent_message_id,
         role="user",
         content=content_blocks,
+        sender_id=user.id,
+        hidden_from_owner=body.hidden_from_owner,
     )
     db.add(user_message)
     await db.flush()
 
     # Load conversation history
+    is_owner = conversation.user_id == user.id
+    if is_owner:
+        msg_filter = (Message.hidden_from_owner == False)
+    else:
+        msg_filter = ((Message.hidden_from_owner == False) | (Message.sender_id == user.id))
+
     result = await db.execute(
         select(Message)
         .where(
             Message.conversation_id == conversation.id,
             Message.is_active_branch == True,
+            msg_filter,
         )
         .order_by(Message.created_at)
     )
@@ -196,6 +209,8 @@ async def chat_stream(
                     input_tokens=input_tokens or None,
                     output_tokens=output_tokens or None,
                     latency_ms=latency_ms,
+                    sender_id=user_message.sender_id,
+                    hidden_from_owner=user_message.hidden_from_owner,
                 )
                 save_db.add(ai_message)
 
@@ -243,20 +258,39 @@ async def get_chat_history(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all messages for a conversation (full tree for branching)."""
-    # Verify ownership
+    """Get all messages for a conversation (accessible by owner or shared users)."""
+    from app.models.conversation_share import ConversationShare
+    from sqlalchemy.orm import selectinload, joinedload
+
+    # Verify ownership or share access
     result = await db.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.user_id == user.id,
+        select(Conversation)
+        .options(selectinload(Conversation.user))
+        .where(
+            (Conversation.id == conversation_id) &
+            ((Conversation.user_id == user.id) |
+             Conversation.id.in_(
+                 select(ConversationShare.conversation_id).where(ConversationShare.user_id == user.id)
+             ))
         )
     )
-    if not result.scalar_one_or_none():
+    conv = result.scalar_one_or_none()
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    is_owner = conv.user_id == user.id
+    if is_owner:
+        msg_filter = (Message.hidden_from_owner == False)
+    else:
+        msg_filter = ((Message.hidden_from_owner == False) | (Message.sender_id == user.id))
 
     result = await db.execute(
         select(Message)
-        .where(Message.conversation_id == conversation_id)
+        .options(joinedload(Message.sender))
+        .where(
+            Message.conversation_id == conversation_id,
+            msg_filter
+        )
         .order_by(Message.created_at)
     )
     messages = result.scalars().all()
@@ -274,9 +308,71 @@ async def get_chat_history(
             latency_ms=msg.latency_ms,
             is_active_branch=msg.is_active_branch,
             created_at=msg.created_at,
+            sender_id=msg.sender_id,
+            sender_username=msg.sender.username if msg.sender else None,
+            hidden_from_owner=msg.hidden_from_owner,
         )
         for msg in messages
     ]
+
+
+@router.patch("/messages/{message_id}/visibility", response_model=MessageResponse)
+async def toggle_message_visibility(
+    message_id: uuid.UUID,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle a message's hidden_from_owner visibility. Sender only."""
+    from sqlalchemy.orm import joinedload
+
+    result = await db.execute(
+        select(Message)
+        .options(joinedload(Message.sender))
+        .where(Message.id == message_id, Message.sender_id == user.id)
+    )
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(
+            status_code=404,
+            detail="Message not found or you are not authorized to modify it"
+        )
+
+    # Toggle visibility
+    new_visibility = not msg.hidden_from_owner
+    msg.hidden_from_owner = new_visibility
+
+    # Also synchronize all child assistant responses (replies generated from this prompt)
+    child_responses_result = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == msg.conversation_id,
+            Message.parent_message_id == msg.id,
+            Message.role == "assistant"
+        )
+    )
+    child_responses = child_responses_result.scalars().all()
+    for child in child_responses:
+        child.hidden_from_owner = new_visibility
+
+    await db.commit()
+    await db.refresh(msg, ["sender"])
+
+    return MessageResponse(
+        id=msg.id,
+        conversation_id=msg.conversation_id,
+        parent_message_id=msg.parent_message_id,
+        role=msg.role,
+        content=msg.content if isinstance(msg.content, list) else [msg.content],
+        model_id=msg.model_id,
+        input_tokens=msg.input_tokens,
+        output_tokens=msg.output_tokens,
+        latency_ms=msg.latency_ms,
+        is_active_branch=msg.is_active_branch,
+        created_at=msg.created_at,
+        sender_id=msg.sender_id,
+        sender_username=msg.sender.username if msg.sender else None,
+        hidden_from_owner=msg.hidden_from_owner,
+    )
 
 
 @router.delete("/message/{message_id}", status_code=status.HTTP_204_NO_CONTENT)

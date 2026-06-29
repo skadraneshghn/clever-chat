@@ -87,6 +87,20 @@ async def lifespan(app: FastAPI):
             )
             # Create all tables
             await conn.run_sync(Base.metadata.create_all)
+            # Ensure sender_id column exists on messages
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                    "sender_id UUID REFERENCES users(id) ON DELETE SET NULL"
+                )
+            )
+            # Ensure hidden_from_owner column exists on messages
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                    "hidden_from_owner BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
             # Ensure color_theme column exists
             await conn.execute(
                 __import__("sqlalchemy").text(

@@ -214,3 +214,12 @@ async def logout(user=Depends(get_current_user), db: AsyncSession = Depends(get_
 async def get_me(user=Depends(get_current_user)):
     """Get current authenticated user profile."""
     return user
+
+
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """List all other active users on the system."""
+    result = await db.execute(
+        select(User).where(User.id != user.id, User.is_active == True).order_by(User.username)
+    )
+    return result.scalars().all()

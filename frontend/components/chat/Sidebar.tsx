@@ -18,6 +18,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useRouter } from 'next/navigation';
 import { format, isToday, isYesterday, isThisWeek, isThisMonth } from 'date-fns';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
+import type { ShareUser } from '@/types';
 
 const NAV_SECTIONS = [
   {
@@ -41,14 +44,44 @@ const NAV_SECTIONS = [
 
 export default function Sidebar() {
   const router = useRouter();
-  const { conversations, fetchConversations, activeConversationId, setActiveConversation, deleteConversation, resetChat } = useChatStore();
+  const {
+    conversations, fetchConversations, activeConversationId,
+    setActiveConversation, deleteConversation, resetChat,
+    shareConversationPrivate, unshareConversationPrivate, fetchConversationShares
+  } = useChatStore();
   const { user, logout } = useAuthStore();
   const { sidebarOpen, setSidebarOpen, isMobile, setMobileDrawerOpen } = useUIStore();
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
+  // Sharing states
+  const [shareModalConvId, setShareModalConvId] = useState<string | null>(null);
+  const [shareTab, setShareTab] = useState<'public' | 'private'>('public');
+  const [searchUserQuery, setSearchUserQuery] = useState('');
+  const [systemUsers, setSystemUsers] = useState<any[]>([]);
+  const [sharedUsers, setSharedUsers] = useState<ShareUser[]>([]);
+  const [publicShareToken, setPublicShareToken] = useState<string | null>(null);
+  const [isSharingAction, setIsSharingAction] = useState(false);
+
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
+
+  useEffect(() => {
+    if (shareModalConvId) {
+      const conv = conversations.find(c => c.id === shareModalConvId);
+      setPublicShareToken(conv?.share_token || null);
+      
+      // Load shared users
+      fetchConversationShares(shareModalConvId)
+        .then(setSharedUsers)
+        .catch(err => console.error(err));
+         
+      // Load system users
+      api.get<any[]>('/auth/users')
+        .then(setSystemUsers)
+        .catch(err => console.error(err));
+    }
+  }, [shareModalConvId, conversations, fetchConversationShares]);
 
   const filtered = conversations.filter((c) =>
     c.title.toLowerCase().includes(search.toLowerCase())
@@ -82,7 +115,8 @@ export default function Sidebar() {
   }
 
   return (
-    <AnimatePresence>
+    <>
+      <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
           initial={{ width: 0, opacity: 0 }}
@@ -238,10 +272,20 @@ export default function Sidebar() {
                       onClick={() => handleConvClick(conv.id)}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 9,
-                        padding: '7px 32px 7px 10px', fontSize: 13.5,
-                        color: activeConversationId === conv.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        background: activeConversationId === conv.id ? 'var(--bg-active-menu)' : 'transparent',
-                        border: activeConversationId === conv.id ? '1px solid var(--border-active-menu)' : '1px solid transparent',
+                        padding: conv.is_shared ? '5px 32px 5px 10px' : '7px 32px 7px 10px', fontSize: 13.5,
+                        color: activeConversationId === conv.id 
+                          ? 'var(--text-primary)' 
+                          : (conv.is_shared ? 'rgba(139, 92, 246, 0.85)' : 'var(--text-secondary)'),
+                        background: activeConversationId === conv.id 
+                          ? (conv.is_shared 
+                              ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(99, 102, 241, 0.12))' 
+                              : 'var(--bg-active-menu)') 
+                          : (conv.is_shared ? 'rgba(139, 92, 246, 0.03)' : 'transparent'),
+                        border: activeConversationId === conv.id 
+                          ? (conv.is_shared 
+                              ? '1px solid rgba(139, 92, 246, 0.35)' 
+                              : '1px solid var(--border-active-menu)') 
+                          : (conv.is_shared ? '1px dashed rgba(139, 92, 246, 0.2)' : '1px solid transparent'),
                         boxShadow: activeConversationId === conv.id ? 'var(--shadow-active-menu)' : 'none',
                         borderRadius: 'var(--radius-md)', cursor: 'pointer',
                         textAlign: 'left', transition: 'all var(--transition-fast)',
@@ -249,19 +293,36 @@ export default function Sidebar() {
                       }}
                       onMouseEnter={(e) => {
                         if (activeConversationId !== conv.id) {
-                          e.currentTarget.style.background = 'var(--surface-1)';
+                          e.currentTarget.style.background = conv.is_shared ? 'rgba(139, 92, 246, 0.08)' : 'var(--surface-1)';
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (activeConversationId !== conv.id) {
-                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.background = conv.is_shared ? 'rgba(139, 92, 246, 0.03)' : 'transparent';
                         }
                       }}
                     >
-                      <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {conv.title}
-                      </span>
+                      {conv.is_shared ? (
+                        <Users size={14} style={{ flexShrink: 0, color: '#8b5cf6' }} />
+                      ) : (
+                        <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      )}
+
+                      {conv.is_shared ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1, lineHeight: 1.25 }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5 }}>
+                            {conv.title}
+                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', opacity: 0.8 }}>
+                            from @{conv.owner_username}
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {conv.title}
+                        </span>
+                      )}
+
                       {conv.is_pinned && <Pin size={11} style={{ color: 'var(--accent-warning)', flexShrink: 0 }} />}
                     </button>
                     <button
@@ -322,15 +383,28 @@ export default function Sidebar() {
                           }}
                         >
                           <button
-                            disabled
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              setShareModalConvId(conv.id);
+                            }}
+                            disabled={conv.is_shared}
                             style={{
                               display: 'flex', alignItems: 'center', gap: 10,
                               padding: '6px 10px', fontSize: 13, border: 'none',
-                              background: 'transparent', color: 'var(--text-muted)',
-                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                              background: 'transparent', color: conv.is_shared ? 'var(--text-muted)' : 'var(--text-secondary)',
+                              textAlign: 'left', cursor: conv.is_shared ? 'not-allowed' : 'pointer', width: '100%',
+                              borderRadius: 'var(--radius-md)',
+                              transition: 'all var(--transition-fast)',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!conv.is_shared) e.currentTarget.style.background = 'var(--surface-1)';
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!conv.is_shared) e.currentTarget.style.background = 'transparent';
                             }}
                           >
-                            <Share2 size={14} />
+                            <Share2 size={14} style={{ color: conv.is_shared ? 'var(--text-muted)' : 'var(--text-secondary)' }} />
                             <span>Share</span>
                           </button>
                           <button
@@ -579,7 +653,377 @@ export default function Sidebar() {
           )}
         </motion.aside>
       )}
-    </AnimatePresence>
+      </AnimatePresence>
+
+      {/* ── Share Modal Overlay ────────────────────────────────────── */}
+      <AnimatePresence>
+        {shareModalConvId && (
+          <div
+            onClick={() => setShareModalConvId(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.4)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+          >
+            {/* Modal Card */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: 460,
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-xl)',
+                boxShadow: 'var(--shadow-2xl)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {/* Header */}
+              <div style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-heading)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Share2 size={18} style={{ color: 'var(--accent-primary)' }} /> Share Conversation
+                </span>
+                <button
+                  onClick={() => setShareModalConvId(null)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-muted)', fontSize: 18, fontWeight: 500,
+                    padding: 4, borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div style={{
+                display: 'flex',
+                borderBottom: '1px solid var(--border-subtle)',
+                background: 'var(--surface-1)',
+              }}>
+                <button
+                  onClick={() => setShareTab('public')}
+                  style={{
+                    flex: 1,
+                    padding: '12px 16px',
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: shareTab === 'public' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                    color: shareTab === 'public' ? 'var(--text-heading)' : 'var(--text-muted)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Public Link
+                </button>
+                <button
+                  onClick={() => setShareTab('private')}
+                  style={{
+                    flex: 1,
+                    padding: '12px 16px',
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: shareTab === 'private' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                    color: shareTab === 'private' ? 'var(--text-heading)' : 'var(--text-muted)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Share Privately
+                </button>
+              </div>
+
+              {/* Body Content */}
+              <div style={{ padding: 20, minHeight: 180, display: 'flex', flexDirection: 'column' }}>
+                
+                {/* PUBLIC TAB */}
+                {shareTab === 'public' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
+                      Generate a public read-only link. Anyone with this URL can view the conversation history and messages.
+                    </p>
+                    
+                    {publicShareToken ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          background: 'var(--surface-1)',
+                          border: '1px solid var(--border-default)',
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-lg)',
+                        }}>
+                          <input
+                            readOnly
+                            value={`${typeof window !== 'undefined' ? window.location.origin : ''}/shared/${publicShareToken}`}
+                            style={{
+                              flex: 1,
+                              background: 'none',
+                              border: 'none',
+                              outline: 'none',
+                              fontSize: 12.5,
+                              color: 'var(--text-primary)',
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${window.location.origin}/shared/${publicShareToken}`);
+                              toast.success('Public link copied to clipboard!');
+                            }}
+                            style={{
+                              background: 'var(--accent-primary)',
+                              color: 'white',
+                              border: 'none',
+                              padding: '5px 10px',
+                              borderRadius: 'var(--radius-md)',
+                              fontSize: 12,
+                              fontWeight: 500,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        
+                        <button
+                          onClick={async () => {
+                            try {
+                              setIsSharingAction(true);
+                              await api.delete(`/conversations/${shareModalConvId}/share`);
+                              setPublicShareToken(null);
+                              useChatStore.getState().updateConversation(shareModalConvId!, { share_token: null });
+                              toast.success('Public link revoked successfully.');
+                            } catch (e) {
+                              toast.error('Failed to revoke public link.');
+                            } finally {
+                              setIsSharingAction(false);
+                            }
+                          }}
+                          disabled={isSharingAction}
+                          style={{
+                            alignSelf: 'flex-start',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--accent-error)',
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            padding: '4px 0',
+                          }}
+                        >
+                          Revoke Public Access
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          try {
+                            setIsSharingAction(true);
+                            const res = await api.post<{ share_token: string }>(`/conversations/${shareModalConvId}/share`);
+                            setPublicShareToken(res.share_token);
+                            useChatStore.getState().updateConversation(shareModalConvId!, { share_token: res.share_token });
+                            toast.success('Public link generated!');
+                          } catch (e) {
+                            toast.error('Failed to generate public link.');
+                          } finally {
+                            setIsSharingAction(false);
+                          }
+                        }}
+                        disabled={isSharingAction}
+                        style={{
+                          background: 'var(--accent-primary)',
+                          color: 'white',
+                          border: 'none',
+                          padding: '10px 16px',
+                          borderRadius: 'var(--radius-lg)',
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'opacity 0.2s',
+                          opacity: isSharingAction ? 0.7 : 1,
+                        }}
+                      >
+                        Create Public Share Link
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* PRIVATE TAB */}
+                {shareTab === 'private' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
+                      Share this conversation privately with specific users. They will see it in their sidebar and can participate in it.
+                    </p>
+                    
+                    {/* Autocomplete / User Selector */}
+                    <div style={{ display: 'flex', gap: 8, position: 'relative' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          type="text"
+                          placeholder="Enter recipient's username"
+                          value={searchUserQuery}
+                          onChange={(e) => setSearchUserQuery(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            fontSize: 13,
+                            background: 'var(--surface-1)',
+                            border: '1px solid var(--border-default)',
+                            borderRadius: 'var(--radius-lg)',
+                            color: 'var(--text-primary)',
+                            outline: 'none',
+                          }}
+                        />
+                        {/* Autocomplete Dropdown */}
+                        {searchUserQuery && (
+                          <div style={{
+                            position: 'absolute',
+                            top: 'calc(100% + 4px)',
+                            left: 0,
+                            right: 0,
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-default)',
+                            borderRadius: 'var(--radius-lg)',
+                            boxShadow: 'var(--shadow-lg)',
+                            maxHeight: 150,
+                            overflowY: 'auto',
+                            zIndex: 10,
+                          }}>
+                            {systemUsers
+                              .filter(u => u.username.toLowerCase().includes(searchUserQuery.toLowerCase()) && !sharedUsers.some(su => su.id === u.id))
+                              .map(u => (
+                                <div
+                                  key={u.id}
+                                  onClick={() => {
+                                    setSearchUserQuery(u.username);
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    fontSize: 13,
+                                    cursor: 'pointer',
+                                    color: 'var(--text-primary)',
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  @{u.username} ({u.email})
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!searchUserQuery.trim()) return;
+                          try {
+                            setIsSharingAction(true);
+                            const recipient = await shareConversationPrivate(shareModalConvId!, searchUserQuery);
+                            setSharedUsers([...sharedUsers, recipient]);
+                            setSearchUserQuery('');
+                            toast.success(`Conversation shared with @${recipient.username}!`);
+                          } catch (e: any) {
+                            toast.error(e.response?.data?.detail || 'Failed to share conversation.');
+                          } finally {
+                            setIsSharingAction(false);
+                          }
+                        }}
+                        disabled={isSharingAction || !searchUserQuery}
+                        style={{
+                          background: 'var(--accent-primary)',
+                          color: 'white',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: 'var(--radius-lg)',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Share
+                      </button>
+                    </div>
+
+                    {/* Shared Users List */}
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, flex: 1, maxHeight: 150, overflowY: 'auto' }}>
+                      <span style={{ fontSize: 11, fontWeight: 750, color: 'var(--text-muted)' }}>SHARED WITH</span>
+                      {sharedUsers.length > 0 ? (
+                        sharedUsers.map(u => (
+                          <div
+                            key={u.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              background: 'var(--surface-1)',
+                              padding: '6px 10px',
+                              borderRadius: 'var(--radius-md)',
+                              border: '1px solid var(--border-subtle)',
+                            }}
+                          >
+                            <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>@{u.username}</span>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  setIsSharingAction(true);
+                                  await unshareConversationPrivate(shareModalConvId!, u.username);
+                                  setSharedUsers(sharedUsers.filter(su => su.id !== u.id));
+                                  toast.success(`Access revoked for @${u.username}.`);
+                                } catch (e) {
+                                  toast.error('Failed to revoke access.');
+                                } finally {
+                                  setIsSharingAction(false);
+                                }
+                              }}
+                              disabled={isSharingAction}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--accent-error)',
+                                fontSize: 12,
+                                cursor: 'pointer',
+                                padding: 2,
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Not shared with any users yet.</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 

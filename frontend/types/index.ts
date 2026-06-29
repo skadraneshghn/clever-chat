@@ -44,6 +44,9 @@ export interface Conversation {
   updated_at: string;
   message_count: number;
   last_message_preview: string | null;
+  user_id: string;
+  is_shared: boolean;
+  owner_username: string | null;
 }
 
 export interface ConversationListResponse {
@@ -79,6 +82,9 @@ export interface Message {
   is_active_branch: boolean;
   created_at: string;
   children_count?: number;
+  sender_id: string | null;
+  sender_username: string | null;
+  hidden_from_owner: boolean;
 }
 
 // ── Chat Stream ─────────────────────────────────────────────────────────────
@@ -92,6 +98,13 @@ export interface ChatStreamRequest {
   system_prompt?: string;
   parent_message_id?: string | null;
   media_asset_ids?: string[];
+  hidden_from_owner?: boolean;
+}
+
+export interface ShareUser {
+  id: string;
+  username: string;
+  email: string;
 }
 
 // ── SSE Events ──────────────────────────────────────────────────────────────

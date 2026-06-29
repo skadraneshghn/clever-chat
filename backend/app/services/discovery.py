@@ -15,10 +15,10 @@ def _detect_capabilities(model_id: str) -> dict:
     mid = model_id.lower()
     return {
         "vision": any(kw in mid for kw in ("vision", "vl", "llava", "4o", "o4", "gpt-4-turbo")),
-        "reasoning": any(kw in mid for kw in (
-            "nemotron", "r1", "think", "reasoning", "o1", "o3", "o4",
-            "deepseek-r", "qwq",
-        )),
+        "reasoning": (
+            any(kw in mid for kw in ("r1", "think", "reasoning", "qwq", "o3-"))
+            or (("o1" in mid or "o3" in mid) and "4o" not in mid)
+        ),
         "function_calling": any(kw in mid for kw in ("gpt-", "claude-", "mistral", "command")),
     }
 

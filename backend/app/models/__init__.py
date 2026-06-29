@@ -1,6 +1,7 @@
 """Database models package — import all models for metadata registration."""
 
 from app.models.conversation import Conversation
+from app.models.conversation_share import ConversationShare
 from app.models.discovered_model import DiscoveredModel
 from app.models.embeddings import DocumentChunk, MessageEmbedding
 from app.models.media_asset import MediaAsset
@@ -14,6 +15,7 @@ __all__ = [
     "User",
     "Session",
     "Conversation",
+    "ConversationShare",
     "Message",
     "UserPreferences",
     "MediaAsset",

@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { Conversation, Message, ContentBlock } from '@/types';
+import type { Conversation, Message, ContentBlock, ShareUser } from '@/types';
 import { api } from '@/lib/api';
 
 interface ChatState {
@@ -31,6 +31,10 @@ interface ChatState {
   createConversation: (title?: string) => Promise<Conversation>;
   setConversationIdFromStream: (id: string) => void;
   resetChat: () => void;
+  toggleMessageVisibility: (messageId: string) => Promise<void>;
+  shareConversationPrivate: (convId: string, username: string) => Promise<ShareUser>;
+  unshareConversationPrivate: (convId: string, username: string) => Promise<void>;
+  fetchConversationShares: (convId: string) => Promise<ShareUser[]>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -87,6 +91,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       latency_ms: null,
       is_active_branch: true,
       created_at: new Date().toISOString(),
+      sender_id: null,
+      sender_username: null,
+      hidden_from_owner: false,
     };
     set((state) => ({ messages: [...state.messages, tempMessage] }));
   },
@@ -167,5 +174,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       activeNodes: [],
     });
+  },
+
+  toggleMessageVisibility: async (messageId) => {
+    try {
+      const updatedMsg = await api.patch<Message>(`/chat/messages/${messageId}/visibility`, {});
+      set((state) => {
+        const newMessages = state.messages.map((m) => {
+          if (m.id === messageId) {
+            return updatedMsg;
+          }
+          if (m.parent_message_id === messageId && m.role === 'assistant') {
+            return { ...m, hidden_from_owner: updatedMsg.hidden_from_owner };
+          }
+          return m;
+        });
+        return { messages: newMessages };
+      });
+    } catch (err) {
+      console.error('Failed to toggle message visibility:', err);
+      throw err;
+    }
+  },
+
+  shareConversationPrivate: async (convId, username) => {
+    return await api.post<ShareUser>(`/conversations/${convId}/share/private`, { username });
+  },
+
+  unshareConversationPrivate: async (convId, username) => {
+    await api.delete(`/conversations/${convId}/share/private/${username}`);
+  },
+
+  fetchConversationShares: async (convId) => {
+    return await api.get<ShareUser[]>(`/conversations/${convId}/shares`);
   },
 }));

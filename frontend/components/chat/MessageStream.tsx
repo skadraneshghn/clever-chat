@@ -130,6 +130,9 @@ export default function MessageStream() {
                 latency_ms: null,
                 is_active_branch: true,
                 created_at: new Date().toISOString(),
+                sender_id: null,
+                sender_username: null,
+                hidden_from_owner: false,
               }}
               isStreaming={true}
               streamingContent={streamingContent}

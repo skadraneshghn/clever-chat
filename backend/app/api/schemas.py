@@ -72,6 +72,9 @@ class ConversationResponse(BaseModel):
     updated_at: datetime
     message_count: int = 0
     last_message_preview: str | None = None
+    user_id: uuid.UUID
+    is_shared: bool = False
+    owner_username: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -100,14 +103,16 @@ class MessageResponse(BaseModel):
     conversation_id: uuid.UUID
     parent_message_id: uuid.UUID | None
     role: str
-    content: list[ContentBlock] | list[dict]
+    content: list[ContentBlock]
     model_id: str | None
     input_tokens: int | None
     output_tokens: int | None
     latency_ms: int | None
     is_active_branch: bool
     created_at: datetime
-    children_count: int = 0
+    sender_id: uuid.UUID | None = None
+    sender_username: str | None = None
+    hidden_from_owner: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -121,6 +126,19 @@ class ChatStreamRequest(BaseModel):
     system_prompt: str | None = None
     parent_message_id: uuid.UUID | None = None
     media_asset_ids: list[uuid.UUID] = []
+    hidden_from_owner: bool = False
+
+
+class PrivateShareRequest(BaseModel):
+    username: str
+
+
+class ShareUserResponse(BaseModel):
+    id: uuid.UUID
+    username: str
+    email: str
+
+    model_config = {"from_attributes": True}
 
 
 # ── Preferences Schemas ─────────────────────────────────────────────────────

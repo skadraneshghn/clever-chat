@@ -12,10 +12,13 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   FiCopy, FiCheck, FiRefreshCw, FiEdit3, FiThumbsUp,
-  FiThumbsDown, FiShare2, FiMoreHorizontal,
+  FiThumbsDown, FiShare2, FiMoreHorizontal, FiEye, FiEyeOff,
 } from 'react-icons/fi';
 import { RiRobot2Line, RiUser3Line } from 'react-icons/ri';
 import { messageAppear } from '@/lib/motion';
+import { useChatStore } from '@/stores/chatStore';
+import { useAuthStore } from '@/stores/authStore';
+import { toast } from 'sonner';
 import type { Message, ContentBlock } from '@/types';
 
 interface MessageBubbleProps {
@@ -29,6 +32,18 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
   const [copied, setCopied] = useState(false);
   const [hovering, setHovering] = useState(false);
   const isUser = message.role === 'user';
+
+  const { conversations, toggleMessageVisibility } = useChatStore();
+  const { user } = useAuthStore();
+
+  const activeConv = conversations.find((c) => c.id === message.conversation_id);
+  const isShared = activeConv?.is_shared || false;
+
+  const senderLabel = isUser
+    ? (message.sender_id === user?.id ? 'You' : (message.sender_username ? `@${message.sender_username}` : 'User'))
+    : 'CleverChat';
+
+  const isOwnerMessage = message.sender_id === activeConv?.user_id;
 
   // Extract text content
   const textContent = message.content
@@ -89,7 +104,35 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
           alignItems: 'center',
           gap: 8,
         }}>
-          {isUser ? 'You' : 'CleverChat'}
+          {isUser ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>{senderLabel}</span>
+              {isOwnerMessage && isShared && (
+                <span style={{ fontSize: 10, background: 'rgba(99, 102, 241, 0.15)', color: '#4f46e5', padding: '1px 5px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
+                  Owner
+                </span>
+              )}
+              {message.hidden_from_owner && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent-error)', fontWeight: 500, marginLeft: 4 }}>
+                  <FiEyeOff size={11} /> Hidden from Owner
+                </span>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>CleverChat</span>
+              {message.sender_username && isShared && (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                  in response to {message.sender_id === user?.id ? 'You' : `@${message.sender_username}`}
+                </span>
+              )}
+              {message.hidden_from_owner && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent-error)', fontWeight: 500, marginLeft: 4 }}>
+                  <FiEyeOff size={11} /> Hidden Response
+                </span>
+              )}
+            </div>
+          )}
           {!isUser && message.model_id && (
             <span className="badge badge-accent" style={{ fontSize: 11 }}>
               {message.model_id}
@@ -232,6 +275,54 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
                 {action.icon}
               </button>
             ))}
+          </motion.div>
+        )}
+
+        {/* Action bar for user messages inside shared chats */}
+        {isUser && isShared && message.sender_id === user?.id && !isStreaming && hovering && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{
+              display: 'flex',
+              gap: 6,
+              marginTop: 8,
+              alignItems: 'center',
+            }}
+          >
+            <button
+              onClick={async () => {
+                try {
+                  await toggleMessageVisibility(message.id);
+                  toast.success(!message.hidden_from_owner ? 'Message is now hidden from the owner.' : 'Message is now visible to the owner.');
+                } catch (e) {
+                  toast.error('Failed to toggle visibility.');
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 8px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--surface-1)',
+                border: '1px solid var(--border-default)',
+                cursor: 'pointer',
+                fontSize: 11.5,
+                fontWeight: 500,
+                color: message.hidden_from_owner ? 'var(--accent-error)' : 'var(--text-secondary)',
+                transition: 'all var(--transition-fast)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--surface-2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--surface-1)';
+              }}
+            >
+              {message.hidden_from_owner ? <FiEye size={13} /> : <FiEyeOff size={13} />}
+              <span>{message.hidden_from_owner ? 'Show to Owner' : 'Hide from Owner'}</span>
+            </button>
           </motion.div>
         )}
       </div>

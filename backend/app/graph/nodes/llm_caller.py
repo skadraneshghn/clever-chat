@@ -79,11 +79,9 @@ def _build_llm(
     # Reasoning model special handling
     is_reasoning = capabilities.get("reasoning", False)
     extra_kwargs = {}
-    if is_reasoning:
-        extra_kwargs["model_kwargs"] = {
-            "reasoning_effort": "medium",
-        }
-        # Reasoning models typically don't use temperature
+    if is_reasoning and provider_type == "openai":
+        extra_kwargs["reasoning_effort"] = "medium"
+        # OpenAI reasoning models (o1/o3-mini) require temperature = 1.0
         temperature = 1.0
 
     if provider_type == "ollama":

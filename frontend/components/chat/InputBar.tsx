@@ -7,7 +7,7 @@
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
-  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square, Zap
+  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square, Zap, Eye, EyeOff
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
@@ -28,10 +28,14 @@ export default function InputBar({ conversationId }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const { isStreaming } = useChatStore();
+  const { isStreaming, conversations } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
   const { availableModels } = useProviderStore();
+
+  const activeConv = conversations.find(c => c.id === conversationId);
+  const isShared = activeConv?.is_shared || false;
+  const [hiddenFromOwner, setHiddenFromOwner] = useState(false);
 
   const currentModel = availableModels.find((m) => m.model_id === preferences.default_model_id);
 
@@ -54,10 +58,12 @@ export default function InputBar({ conversationId }: InputBarProps) {
       temperature: preferences.default_temperature,
       max_tokens: preferences.default_max_tokens,
       system_prompt: preferences.default_system_prompt || undefined,
+      hidden_from_owner: hiddenFromOwner,
     });
     
     setMessage('');
     setAttachments([]); // Clear attachments on send
+    setHiddenFromOwner(false); // Reset toggle after send
 
     // Reset textarea height
     if (textareaRef.current) {
@@ -345,7 +351,40 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 <Zap size={13} style={{ color: reasoningOnly ? '#ea580c' : 'var(--text-muted)' }} />
                 <span>Reasoning</span>
               </button>
-
+              {/* Private Message Toggle Pill (Only in Shared Chats) */}
+              {isShared && (
+                <button
+                  onClick={() => setHiddenFromOwner(!hiddenFromOwner)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px', height: 32,
+                    fontSize: 12.5, fontWeight: 500,
+                    color: hiddenFromOwner ? 'var(--accent-error)' : 'var(--text-secondary)',
+                    background: hiddenFromOwner ? 'var(--accent-error-soft)' : 'var(--bg-secondary)',
+                    border: hiddenFromOwner ? '1px solid var(--accent-error)' : '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-pill)',
+                    cursor: 'pointer',
+                    boxShadow: 'var(--shadow-xs)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!hiddenFromOwner) {
+                      e.currentTarget.style.background = 'var(--surface-1)';
+                      e.currentTarget.style.borderColor = 'var(--border-strong)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!hiddenFromOwner) {
+                      e.currentTarget.style.background = 'var(--bg-secondary)';
+                      e.currentTarget.style.borderColor = 'var(--border-default)';
+                    }
+                  }}
+                  title="Toggle visibility of this message thread from the conversation owner"
+                >
+                  {hiddenFromOwner ? <EyeOff size={13} style={{ color: 'var(--accent-error)' }} /> : <Eye size={13} style={{ color: 'var(--text-muted)' }} />}
+                  <span>{hiddenFromOwner ? 'Hidden from Owner' : 'Visible to Owner'}</span>
+                </button>
+              )}
               {/* Model Selector Pill */}
               <button
                 onClick={() => {}}

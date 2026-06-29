@@ -100,6 +100,9 @@ export function useSSEStream() {
                   latency_ms: data.latency_ms || null,
                   is_active_branch: true,
                   created_at: new Date().toISOString(),
+                  sender_id: data.sender_id || null,
+                  sender_username: data.sender_username || null,
+                  hidden_from_owner: data.hidden_from_owner || false,
                 };
                 finalizeStreamMessage(finalMessage);
                 fetchConversations();

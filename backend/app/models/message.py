@@ -36,6 +36,10 @@ class Message(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active_branch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    hidden_from_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
         server_default=func.now(),
@@ -44,6 +48,7 @@ class Message(Base):
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     parent = relationship("Message", remote_side="Message.id", backref="children")
+    sender = relationship("User", foreign_keys=[sender_id])
 
     def __repr__(self) -> str:
         return f"<Message {self.id} role={self.role}>"
