@@ -1,46 +1,58 @@
 'use client';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Home Page — New chat welcome screen with greeting and suggestion cards
-   Matching the Katteb reference design
+   Home Page — Katteb-style welcome screen
+   Large greeting, centered input with action chips, 4-column suggestion cards
    ═══════════════════════════════════════════════════════════════════════════ */
 
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import { RiRobot2Line } from 'react-icons/ri';
-import { FiEdit3, FiZap, FiCode, FiFileText } from 'react-icons/fi';
-import { useChatStore } from '@/stores/chatStore';
+import { RiRobot2Line, RiSparklingLine, RiImageLine } from 'react-icons/ri';
+import { FiEdit3, FiZap, FiCode, FiFileText, FiCpu, FiSend, FiPaperclip } from 'react-icons/fi';
+import { TbBrain } from 'react-icons/tb';
+import { MdOutlineImageSearch } from 'react-icons/md';
 import { useAuthStore } from '@/stores/authStore';
 import InputBar from '@/components/chat/InputBar';
-import { fadeInUp, staggerContainer } from '@/lib/motion';
+import { staggerContainer, fadeInUp } from '@/lib/motion';
 
-const suggestionCards = [
+const ACTION_CHIPS = [
+  { icon: <TbBrain size={14} />,        label: 'Reasoning' },
+  { icon: <RiImageLine size={14} />,    label: 'Create Image' },
+  { icon: <MdOutlineImageSearch size={14} />, label: 'Deep Research' },
+];
+
+const SUGGESTION_CARDS = [
   {
-    icon: <FiEdit3 size={18} />,
-    color: 'var(--accent-primary)',
-    bgColor: 'var(--accent-primary-soft)',
+    icon: <FiEdit3 size={16} />,
+    color: '#6366f1',
+    bg: '#eef2ff',
     title: 'Write Content',
-    description: 'Draft emails, articles, blog posts, and creative writing pieces.',
+    description: 'Draft emails, articles, blog posts and creative pieces.',
+    prompt: 'Help me write a compelling blog post about',
   },
   {
-    icon: <FiZap size={18} />,
-    color: 'var(--accent-pink)',
-    bgColor: 'var(--accent-pink-soft)',
+    icon: <RiSparklingLine size={16} />,
+    color: '#ec4899',
+    bg: '#fdf2f8',
     title: 'Creative Ideas',
-    description: 'Generate creative and catchy headlines, slogans, and ideas.',
+    description: 'Generate catchy headlines, slogans and brainstorm ideas.',
+    prompt: 'Give me 5 creative headline ideas for',
   },
   {
-    icon: <FiFileText size={18} />,
-    color: 'var(--accent-warning)',
-    bgColor: 'var(--accent-warning-soft)',
+    icon: <FiFileText size={16} />,
+    color: '#f59e0b',
+    bg: '#fffbeb',
     title: 'Summarize Text',
-    description: 'Paste a long article or document and get a concise summary.',
+    description: 'Paste a long article and get a concise summary.',
+    prompt: 'Please summarize the following text:',
   },
   {
-    icon: <FiCode size={18} />,
-    color: 'var(--accent-teal)',
-    bgColor: 'var(--accent-teal-soft)',
+    icon: <FiCode size={16} />,
+    color: '#10b981',
+    bg: '#f0fdf4',
     title: 'Code Assistant',
-    description: 'Write code, debug errors, explain algorithms, and review PRs.',
+    description: 'Write code, debug errors and review pull requests.',
+    prompt: 'Help me write a function that',
   },
 ];
 
@@ -48,154 +60,134 @@ export default function HomePage() {
   const { user } = useAuthStore();
 
   function getGreeting() {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 17) return 'Good Afternoon';
     return 'Good Evening';
   }
 
+  const firstName = user?.username || 'there';
+
   return (
     <div style={{
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
+      flex: 1, display: 'flex', flexDirection: 'column',
+      overflow: 'hidden', background: 'var(--bg-secondary)',
     }}>
-      {/* Center content */}
+      {/* Scrollable content area */}
       <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '0 24px',
+        flex: 1, overflowY: 'auto',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        padding: '40px 24px 24px',
         gap: 0,
       }}>
-        {/* Logo */}
+
+        {/* ── Logo orb ────────────────────────────────────── */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
+          initial={{ opacity: 0, scale: 0.75 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
+          transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
           style={{
-            width: 64,
-            height: 64,
-            borderRadius: 'var(--radius-xl)',
-            background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            fontSize: 28,
-            marginBottom: 24,
-            boxShadow: '0 8px 32px rgba(79, 70, 229, 0.2)',
+            width: 72, height: 72,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle at 35% 35%, #374151, #111827)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'white', fontSize: 30,
+            marginBottom: 22,
+            boxShadow: '0 8px 32px rgba(0,0,0,.15), inset 0 1px 0 rgba(255,255,255,.08)',
           }}
         >
           <RiRobot2Line />
         </motion.div>
 
-        {/* Greeting */}
+        {/* ── Greeting ────────────────────────────────────── */}
         <motion.h1
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.4 }}
           style={{
-            fontSize: 32,
-            fontWeight: 600,
+            fontSize: 34, fontWeight: 700,
             color: 'var(--text-heading)',
-            textAlign: 'center',
-            margin: 0,
-            lineHeight: 1.3,
+            textAlign: 'center', margin: 0, lineHeight: 1.25,
           }}
         >
-          {getGreeting()}, {user?.username || 'there'}
+          {getGreeting()}, {firstName}
         </motion.h1>
+
         <motion.h2
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.4 }}
+          transition={{ delay: 0.18, duration: 0.4 }}
           style={{
-            fontSize: 28,
-            fontWeight: 600,
-            textAlign: 'center',
-            margin: '4px 0 32px',
-            lineHeight: 1.3,
+            fontSize: 30, fontWeight: 700,
+            textAlign: 'center', margin: '4px 0 32px', lineHeight: 1.25,
+            color: 'var(--text-heading)',
           }}
         >
           How Can I{' '}
-          <span style={{
-            background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-          }}>
-            Assist You Today?
-          </span>
+          <span style={{ color: '#4f46e5' }}>Assist You Today?</span>
         </motion.h2>
 
-        {/* Input Bar */}
+        {/* ── Input area ──────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
+          transition={{ delay: 0.26, duration: 0.4 }}
           style={{ width: '100%', maxWidth: 'var(--max-content-width)' }}
         >
           <InputBar />
         </motion.div>
 
-        {/* Suggestion Cards */}
+        {/* ── Suggestion cards ────────────────────────────── */}
         <motion.div
           variants={staggerContainer}
           initial="hidden"
           animate="visible"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gridTemplateColumns: 'repeat(4, 1fr)',
             gap: 12,
             maxWidth: 'var(--max-content-width)',
             width: '100%',
-            marginTop: 8,
-            padding: '0 24px',
+            marginTop: 16,
           }}
         >
-          {suggestionCards.map((card) => (
-            <motion.div
+          {SUGGESTION_CARDS.map((card) => (
+            <motion.button
               key={card.title}
               variants={fadeInUp}
-              className="card card-interactive"
+              onClick={() => {}}
               style={{
-                padding: 16,
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '16px 14px',
                 cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all var(--transition-normal)',
+                boxShadow: 'var(--shadow-card)',
               }}
+              whileHover={{ y: -2, boxShadow: '0 6px 20px rgba(0,0,0,.08)', borderColor: 'var(--border-default)' }}
+              whileTap={{ scale: 0.98 }}
             >
+              {/* Icon */}
               <div style={{
-                width: 32,
-                height: 32,
+                width: 34, height: 34,
                 borderRadius: 'var(--radius-md)',
-                background: card.bgColor,
+                background: card.bg,
                 color: card.color,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
                 marginBottom: 10,
               }}>
                 {card.icon}
               </div>
-              <div style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: 'var(--text-heading)',
-                marginBottom: 4,
-              }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 4 }}>
                 {card.title}
               </div>
-              <div style={{
-                fontSize: 12,
-                color: 'var(--text-muted)',
-                lineHeight: 1.5,
-              }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
                 {card.description}
               </div>
-            </motion.div>
+            </motion.button>
           ))}
         </motion.div>
       </div>

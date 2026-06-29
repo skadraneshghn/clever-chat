@@ -41,19 +41,26 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     <div style={{
       display: 'flex',
       height: '100dvh',
-      background: 'var(--bg-primary)',
+      background: 'var(--bg-app)',
       overflow: 'hidden',
+      padding: '8px',
+      gap: 8,
     }}>
       {/* Sidebar */}
       <Sidebar />
 
-      {/* Main Content */}
+      {/* Main Content — white rounded panel */}
       <div style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
         position: 'relative',
+        background: 'var(--bg-secondary)',
+        borderRadius: 'var(--radius-xl)',
+        overflow: 'hidden',
+        boxShadow: '0 1px 3px rgba(0,0,0,.05)',
+        border: '1px solid var(--border-subtle)',
       }}>
         {/* Header */}
         <ChatHeader />

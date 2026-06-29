@@ -1,12 +1,12 @@
 'use client';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   ChatHeader — Top bar with model selector, search, and new chat
+   ChatHeader — Katteb-style: breadcrumb left, search center, actions right
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FiSearch, FiPlus, FiSettings, FiBell, FiShare2, FiSun, FiMoon } from 'react-icons/fi';
+import { FiSearch, FiPlus, FiSettings, FiBell, FiShare2, FiSun, FiMoon, FiChevronRight } from 'react-icons/fi';
 import { RiRobot2Line } from 'react-icons/ri';
 import { SiOpenai, SiAnthropic } from 'react-icons/si';
 import { usePreferencesStore } from '@/stores/preferencesStore';
@@ -27,10 +27,15 @@ export default function ChatHeader() {
 
   function getProviderIcon(provider: string) {
     switch (provider) {
-      case 'openai': return <SiOpenai size={14} />;
-      case 'anthropic': return <SiAnthropic size={14} />;
-      default: return <RiRobot2Line size={14} />;
+      case 'openai':     return <SiOpenai size={13} />;
+      case 'anthropic':  return <SiAnthropic size={13} />;
+      default:           return <RiRobot2Line size={13} />;
     }
+  }
+
+  function handleNewChat() {
+    resetChat();
+    router.push('/');
   }
 
   return (
@@ -42,179 +47,173 @@ export default function ChatHeader() {
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 20px',
-      gap: 12,
+      gap: 16,
       flexShrink: 0,
     }}>
-      {/* Left: Model selector */}
-      <div style={{ position: 'relative' }}>
-        <button
-          onClick={() => setModelOpen(!modelOpen)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 12px',
-            fontSize: 13,
-            fontWeight: 500,
-            color: 'var(--text-primary)',
-            background: 'var(--surface-1)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
-            transition: 'all var(--transition-fast)',
-          }}
-        >
-          {getProviderIcon(currentModel.provider)}
-          <span>{currentModel.name}</span>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ opacity: 0.5 }}>
-            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
 
-        <AnimatePresence>
-          {modelOpen && (
-            <>
-              <div
-                onClick={() => setModelOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 40 }}
-              />
-              <motion.div
-                variants={dropdownVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: 4,
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-lg)',
-                  boxShadow: 'var(--shadow-lg)',
-                  padding: 4,
-                  minWidth: 240,
-                  zIndex: 50,
-                }}
-              >
-                {AVAILABLE_MODELS.map((model) => (
-                  <button
-                    key={model.id}
-                    onClick={() => {
-                      updatePreferences({ default_model_id: model.id });
-                      setModelOpen(false);
-                    }}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '10px 12px',
-                      fontSize: 13,
-                      color: model.id === preferences.default_model_id ? 'var(--accent-primary)' : 'var(--text-primary)',
-                      background: model.id === preferences.default_model_id ? 'var(--accent-primary-soft)' : 'transparent',
-                      border: 'none',
-                      borderRadius: 'var(--radius-md)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'all var(--transition-fast)',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (model.id !== preferences.default_model_id) {
-                        e.currentTarget.style.background = 'var(--surface-1)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (model.id !== preferences.default_model_id) {
-                        e.currentTarget.style.background = 'transparent';
-                      }
-                    }}
-                  >
-                    <span style={{ fontSize: 16 }}>{getProviderIcon(model.provider)}</span>
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{model.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{model.description}</div>
-                    </div>
-                  </button>
-                ))}
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+      {/* Left: Model selector / breadcrumb */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setModelOpen(!modelOpen)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '5px 11px', fontSize: 13, fontWeight: 500,
+              color: 'var(--text-primary)',
+              background: 'var(--surface-1)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            {getProviderIcon(currentModel.provider)}
+            <span>{currentModel.name}</span>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ opacity: .45 }}>
+              <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+
+          <AnimatePresence>
+            {modelOpen && (
+              <>
+                <div onClick={() => setModelOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                <motion.div
+                  variants={dropdownVariants}
+                  initial="hidden" animate="visible" exit="exit"
+                  style={{
+                    position: 'absolute', top: '100%', left: 0, marginTop: 6,
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-lg)',
+                    boxShadow: 'var(--shadow-lg)',
+                    padding: 6, minWidth: 260, zIndex: 50,
+                  }}
+                >
+                  {AVAILABLE_MODELS.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => { updatePreferences({ default_model_id: model.id }); setModelOpen(false); }}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 12px', fontSize: 13,
+                        color: model.id === preferences.default_model_id ? 'var(--accent-primary)' : 'var(--text-primary)',
+                        background: model.id === preferences.default_model_id ? 'var(--accent-primary-soft)' : 'transparent',
+                        border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                        textAlign: 'left', transition: 'all var(--transition-fast)',
+                      }}
+                      onMouseEnter={(e) => { if (model.id !== preferences.default_model_id) e.currentTarget.style.background = 'var(--surface-1)'; }}
+                      onMouseLeave={(e) => { if (model.id !== preferences.default_model_id) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      {getProviderIcon(model.provider)}
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{model.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{model.description}</div>
+                      </div>
+                    </button>
+                  ))}
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Breadcrumb */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)' }}>
+          <FiChevronRight size={14} />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 400 }}>AI Assistant</span>
+        </div>
       </div>
 
       {/* Center: Search */}
       <div style={{
-        flex: 1,
-        maxWidth: 400,
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
+        flex: 1, maxWidth: 380,
+        position: 'relative', display: 'flex', alignItems: 'center',
       }}>
-        <FiSearch size={14} style={{ position: 'absolute', left: 12, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <FiSearch size={13} style={{ position: 'absolute', left: 11, color: 'var(--text-muted)', pointerEvents: 'none' }} />
         <input
           type="text"
           placeholder="Search"
           style={{
-            width: '100%',
-            padding: '7px 12px 7px 34px',
-            fontSize: 13,
-            color: 'var(--text-primary)',
-            background: 'var(--surface-1)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            outline: 'none',
+            width: '100%', padding: '7px 44px 7px 32px', fontSize: 13,
+            color: 'var(--text-primary)', background: 'var(--surface-1)',
+            border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', outline: 'none',
           }}
         />
         <span style={{
-          position: 'absolute',
-          right: 10,
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          fontFamily: 'monospace',
-          background: 'var(--bg-secondary)',
-          padding: '1px 5px',
-          borderRadius: 'var(--radius-xs)',
-          border: '1px solid var(--border-subtle)',
-        }}>
-          ⌘P
-        </span>
+          position: 'absolute', right: 9, fontSize: 10.5, color: 'var(--text-muted)',
+          fontFamily: 'monospace', background: 'var(--bg-secondary)',
+          padding: '1px 5px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-subtle)',
+        }}>⌘P</span>
       </div>
 
       {/* Right: Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {/* Theme toggle */}
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="btn-ghost btn-icon"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
           title="Toggle theme"
-          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          {theme === 'dark' ? <FiSun size={17} /> : <FiMoon size={17} />}
+          {theme === 'dark' ? <FiSun size={16} /> : <FiMoon size={16} />}
         </button>
+
+        {/* Settings */}
         <button
           onClick={() => router.push('/settings/profile')}
-          className="btn-ghost btn-icon"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
           title="Settings"
-          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiSettings size={17} />
+          <FiSettings size={16} />
         </button>
+
+        {/* Notifications */}
         <button
-          className="btn-ghost btn-icon"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', position: 'relative', transition: 'all var(--transition-fast)' }}
           title="Notifications"
-          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiBell size={17} />
+          <FiBell size={16} />
+          {/* Notification dot */}
+          <span style={{
+            position: 'absolute', top: 5, right: 5,
+            width: 6, height: 6, borderRadius: '50%',
+            background: '#ef4444',
+            border: '1.5px solid var(--bg-secondary)',
+          }} />
         </button>
+
+        {/* Share */}
         <button
-          onClick={() => {
-            resetChat();
-            router.push('/');
-          }}
-          className="btn btn-primary btn-sm"
-          style={{ marginLeft: 4 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
+          title="Share"
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiPlus size={15} />
+          <FiShare2 size={16} />
+        </button>
+
+        {/* New Chat — primary pill button */}
+        <button
+          onClick={handleNewChat}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '7px 16px', marginLeft: 6,
+            fontSize: 13, fontWeight: 500,
+            background: '#111827', color: 'white',
+            border: 'none', borderRadius: 'var(--radius-pill)',
+            cursor: 'pointer', transition: 'all var(--transition-fast)',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+        >
+          <FiPlus size={14} />
           New Chat
         </button>
       </div>
