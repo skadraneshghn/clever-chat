@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
+from typing import TypedDict
 
 from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
     """State tracked through the LangGraph execution graph."""
 
     # ── Core Conversation ────────────────────────────────────────
-    messages: Annotated[list[BaseMessage], add_messages]
+    messages: list[BaseMessage]
     thread_id: str
     user_id: str
 

@@ -203,7 +203,7 @@ async def llm_caller(state: AgentState) -> dict:
         output_tokens = usage_metadata.get("output_tokens", 0)
 
         return {
-            "messages": [response],
+            "messages": messages + [response],
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "finish_reason": "stop",

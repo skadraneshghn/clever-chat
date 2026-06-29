@@ -68,7 +68,12 @@ export default function Sidebar() {
   }
 
   async function handleDelete(id: string) {
+    const isActive = activeConversationId === id;
     await deleteConversation(id);
+    if (isActive) {
+      resetChat();
+      router.push('/');
+    }
   }
 
   function handleLogout() {
