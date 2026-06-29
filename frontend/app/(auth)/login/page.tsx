@@ -11,11 +11,13 @@ import Link from 'next/link';
 import { FiMail, FiLock, FiEye, FiEyeOff, FiArrowRight } from 'react-icons/fi';
 import { RiRobot2Line, RiGoogleLine, RiGithubLine } from 'react-icons/ri';
 import { useAuthStore } from '@/stores/authStore';
+import { useToast } from '@/components/Toast';
 import { fadeInUp } from '@/lib/motion';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isLoading, error, clearError } = useAuthStore();
+  const { login, isLoading, error: storeError, clearError } = useAuthStore();
+  const { success, error } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -24,9 +26,10 @@ export default function LoginPage() {
     e.preventDefault();
     try {
       await login({ email, password });
+      success('Logged in successfully!', 'Welcome back');
       router.push('/');
-    } catch {
-      // Error is set in store
+    } catch (err: any) {
+      error(err?.message || 'Invalid email or password', 'Login Failed');
     }
   }
 
@@ -154,24 +157,6 @@ export default function LoginPage() {
           }}>
             Sign in to continue to your AI workspace
           </p>
-
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              style={{
-                padding: '12px 16px',
-                background: 'var(--accent-error-soft)',
-                color: 'var(--accent-error)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 14,
-                marginBottom: 20,
-                border: '1px solid rgba(239,68,68,0.2)',
-              }}
-            >
-              {error}
-            </motion.div>
-          )}
 
           <form onSubmit={handleSubmit}>
             {/* Email */}

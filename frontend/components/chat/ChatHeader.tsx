@@ -6,9 +6,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FiSearch, FiPlus, FiSettings, FiBell, FiShare2, FiSun, FiMoon, FiChevronRight } from 'react-icons/fi';
-import { RiRobot2Line } from 'react-icons/ri';
-import { SiOpenai, SiAnthropic } from 'react-icons/si';
+import { Search, Plus, Settings, Bell, Share2, Sun, Moon, ChevronRight, Bot } from 'lucide-react';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useRouter } from 'next/navigation';
@@ -26,11 +24,7 @@ export default function ChatHeader() {
   const currentModel = AVAILABLE_MODELS.find((m) => m.id === preferences.default_model_id) || AVAILABLE_MODELS[0];
 
   function getProviderIcon(provider: string) {
-    switch (provider) {
-      case 'openai':     return <SiOpenai size={13} />;
-      case 'anthropic':  return <SiAnthropic size={13} />;
-      default:           return <RiRobot2Line size={13} />;
-    }
+    return <Bot size={13} />;
   }
 
   function handleNewChat() {
@@ -120,7 +114,7 @@ export default function ChatHeader() {
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)' }}>
-          <FiChevronRight size={14} />
+          <ChevronRight size={14} />
           <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 400 }}>AI Assistant</span>
         </div>
       </div>
@@ -130,7 +124,7 @@ export default function ChatHeader() {
         flex: 1, maxWidth: 380,
         position: 'relative', display: 'flex', alignItems: 'center',
       }}>
-        <FiSearch size={13} style={{ position: 'absolute', left: 11, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <Search size={13} style={{ position: 'absolute', left: 11, color: 'var(--text-muted)', pointerEvents: 'none' }} />
         <input
           type="text"
           placeholder="Search"
@@ -157,7 +151,7 @@ export default function ChatHeader() {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          {theme === 'dark' ? <FiSun size={16} /> : <FiMoon size={16} />}
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
         {/* Settings */}
@@ -168,7 +162,7 @@ export default function ChatHeader() {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiSettings size={16} />
+          <Settings size={16} />
         </button>
 
         {/* Notifications */}
@@ -178,7 +172,7 @@ export default function ChatHeader() {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiBell size={16} />
+          <Bell size={16} />
           {/* Notification dot */}
           <span style={{
             position: 'absolute', top: 5, right: 5,
@@ -195,7 +189,7 @@ export default function ChatHeader() {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
         >
-          <FiShare2 size={16} />
+          <Share2 size={16} />
         </button>
 
         {/* New Chat — primary pill button */}
@@ -206,14 +200,14 @@ export default function ChatHeader() {
             padding: '7px 16px', marginLeft: 6,
             fontSize: 13, fontWeight: 500,
             background: '#111827', color: 'white',
-            border: 'none', borderRadius: 'var(--radius-pill)',
+            border: 'none', borderRadius: 'var(--radius-md)',
             cursor: 'pointer', transition: 'all var(--transition-fast)',
             whiteSpace: 'nowrap',
           }}
           onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'}
           onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
         >
-          <FiPlus size={14} />
+          <Plus size={14} />
           New Chat
         </button>
       </div>

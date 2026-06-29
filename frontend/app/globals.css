@@ -83,10 +83,10 @@
     /* ── Radii ──────────────────────────────────────────── */
     --radius-xs:   4px;
     --radius-sm:   6px;
-    --radius-md:   10px;
-    --radius-lg:   14px;
-    --radius-xl:   20px;
-    --radius-2xl:  24px;
+    --radius-md:   8px;         /* smooth button & chip curves */
+    --radius-lg:   12px;        /* smooth suggestion cards */
+    --radius-xl:   16px;        /* smooth chat input panel */
+    --radius-2xl:  24px;        /* smooth main workspace panel */
     --radius-pill: 999px;
 
     /* ── Transitions ─────────────────────────────────────── */
@@ -268,7 +268,7 @@ body {
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
-.btn-primary { background: var(--text-primary); color: var(--text-inverse); box-shadow: var(--shadow-sm); border-radius: var(--radius-pill); }
+.btn-primary { background: var(--text-primary); color: var(--text-inverse); box-shadow: var(--shadow-sm); border-radius: var(--radius-md); }
 .btn-primary:hover:not(:disabled) { opacity: .88; box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .btn-primary:active:not(:disabled) { transform: translateY(0); }
 

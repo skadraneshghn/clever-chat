@@ -7,9 +7,8 @@
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import { motion } from 'motion/react';
 import {
-  FiSend, FiPaperclip, FiMic, FiImage, FiSquare, FiZap,
-} from 'react-icons/fi';
-import { RiSparklingLine, RiImageAddLine, RiSearchEyeLine } from 'react-icons/ri';
+  Send, Paperclip, Square, Sparkles, ImagePlus, LineChart
+} from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { usePreferencesStore } from '@/stores/preferencesStore';
@@ -61,13 +60,6 @@ export default function InputBar({ conversationId }: InputBarProps) {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   };
 
-  const quickActions = [
-    { icon: <FiPaperclip size={15} />, label: 'Attach', onClick: () => {} },
-    { icon: <RiSparklingLine size={15} />, label: 'Reasoning', onClick: () => {} },
-    { icon: <RiImageAddLine size={15} />, label: 'Create Image', onClick: () => {} },
-    { icon: <RiSearchEyeLine size={15} />, label: 'Deep Research', onClick: () => {} },
-  ];
-
   return (
     <div style={{
       padding: '0 24px 24px',
@@ -76,14 +68,20 @@ export default function InputBar({ conversationId }: InputBarProps) {
       width: '100%',
     }}>
       <motion.div
-        animate={isFocused ? { boxShadow: 'var(--shadow-input-focus)' } : { boxShadow: 'var(--shadow-card)' }}
+        animate={isFocused ? { 
+          boxShadow: '0 10px 30px rgba(79, 70, 229, 0.08), 0 2px 12px rgba(79, 70, 229, 0.03)',
+          borderColor: 'rgba(79, 70, 229, 0.4)' 
+        } : { 
+          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.03), 0 2px 8px rgba(0, 0, 0, 0.02)',
+          borderColor: 'rgba(0, 0, 0, 0.07)'
+        }}
         transition={{ duration: 0.2 }}
         style={{
           background: 'var(--bg-card)',
-          border: `1px solid ${isFocused ? 'var(--border-input-focus)' : 'var(--border-default)'}`,
+          border: '1px solid',
           borderRadius: 'var(--radius-xl)',
           overflow: 'hidden',
-          transition: 'border-color var(--transition-fast)',
+          transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
         }}
       >
         {/* Textarea */}
@@ -93,6 +91,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
               fontSize: 18,
               lineHeight: '24px',
               marginTop: 2,
+              opacity: 0.8,
             }}>
               ✨
             </span>
@@ -128,37 +127,77 @@ export default function InputBar({ conversationId }: InputBarProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          background: 'transparent',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {quickActions.map((action) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Attach button (standalone icon) */}
+            <button
+              onClick={() => {}}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 32,
+                height: 32,
+                color: 'var(--text-secondary)',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+                boxShadow: 'var(--shadow-xs)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--surface-1)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--bg-card)';
+                e.currentTarget.style.color = 'var(--text-secondary)';
+              }}
+              title="Attach File"
+            >
+              <Paperclip size={14} />
+            </button>
+
+            {/* Chips (Reasoning, Create Image, Deep Research) */}
+            {[
+              { icon: <Sparkles size={14} color="#6366f1" />, label: 'Reasoning' },
+              { icon: <ImagePlus size={14} color="#ec4899" />, label: 'Create Image' },
+              { icon: <LineChart size={14} color="#f59e0b" />, label: 'Deep Research' },
+            ].map((action) => (
               <button
                 key={action.label}
-                onClick={action.onClick}
+                onClick={() => {}}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 5,
-                  padding: '6px 10px',
-                  fontSize: 13,
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 12.5,
+                  fontWeight: 500,
                   color: 'var(--text-secondary)',
-                  background: 'transparent',
-                  border: 'none',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: 'var(--radius-md)',
                   cursor: 'pointer',
                   transition: 'all var(--transition-fast)',
                   whiteSpace: 'nowrap',
+                  boxShadow: 'var(--shadow-xs)',
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = 'var(--surface-1)';
+                  e.currentTarget.style.borderColor = 'var(--border-strong)';
                   e.currentTarget.style.color = 'var(--text-primary)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.background = 'var(--bg-card)';
+                  e.currentTarget.style.borderColor = 'var(--border-default)';
                   e.currentTarget.style.color = 'var(--text-secondary)';
                 }}
               >
                 {action.icon}
-                <span style={{ fontWeight: 450 }}>{action.label}</span>
+                <span>{action.label}</span>
               </button>
             ))}
           </div>
@@ -171,9 +210,9 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 36,
-                height: 36,
-                borderRadius: 'var(--radius-pill)',
+                width: 32,
+                height: 32,
+                borderRadius: 'var(--radius-md)',
                 background: 'var(--accent-error)',
                 border: 'none',
                 cursor: 'pointer',
@@ -182,7 +221,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
               }}
               title="Stop generating"
             >
-              <FiSquare size={14} />
+              <Square size={13} />
             </button>
           ) : (
             <button
@@ -192,10 +231,10 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 36,
-                height: 36,
-                borderRadius: 'var(--radius-pill)',
-                background: message.trim() ? 'var(--accent-primary)' : 'var(--surface-2)',
+                width: 32,
+                height: 32,
+                borderRadius: 'var(--radius-md)',
+                background: message.trim() ? '#111827' : 'var(--surface-3)',
                 border: 'none',
                 cursor: message.trim() ? 'pointer' : 'default',
                 color: message.trim() ? 'white' : 'var(--text-muted)',
@@ -203,7 +242,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
               }}
               title="Send message"
             >
-              <FiSend size={15} />
+              <Send size={13} style={{ transform: message.trim() ? 'rotate(-45deg) translate(1px, -1px)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
           )}
         </div>

@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { FiMail, FiLock, FiUser, FiEye, FiEyeOff, FiArrowRight, FiCheck } from 'react-icons/fi';
 import { RiRobot2Line, RiGoogleLine, RiGithubLine } from 'react-icons/ri';
 import { useAuthStore } from '@/stores/authStore';
+import { useToast } from '@/components/Toast';
 import { fadeInUp } from '@/lib/motion';
 
 function getPasswordStrength(password: string): { score: number; label: string; color: string } {
@@ -29,7 +30,8 @@ function getPasswordStrength(password: string): { score: number; label: string; 
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register, isLoading, error, clearError } = useAuthStore();
+  const { register, isLoading, error: storeError, clearError } = useAuthStore();
+  const { success, error } = useToast();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -41,9 +43,10 @@ export default function RegisterPage() {
     e.preventDefault();
     try {
       await register({ email, username, password });
+      success('Account created successfully!', 'Welcome to CleverChat');
       router.push('/');
-    } catch {
-      // Error is set in store
+    } catch (err: any) {
+      error(err?.message || 'Registration failed. Username or email might be taken.', 'Signup Failed');
     }
   }
 
@@ -144,24 +147,6 @@ export default function RegisterPage() {
           <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 32 }}>
             Get started for free — no credit card required
           </p>
-
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              style={{
-                padding: '12px 16px',
-                background: 'var(--accent-error-soft)',
-                color: 'var(--accent-error)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 14,
-                marginBottom: 20,
-                border: '1px solid rgba(239,68,68,0.2)',
-              }}
-            >
-              {error}
-            </motion.div>
-          )}
 
           <form onSubmit={handleSubmit}>
             {/* Username */}

@@ -1,18 +1,17 @@
 'use client';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Sidebar — Katteb-style with logo, search, nav sections, premium card,
-   conversation history, and user profile at bottom
+   Sidebar — Katteb-style with Lucide React icons
+   conversation history, tools and profile at bottom
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  FiPlus, FiSearch, FiSettings, FiTrash2, FiMapPin,
-  FiLogOut, FiChevronLeft, FiMessageSquare,
-  FiLayout, FiFileText, FiZap, FiCpu, FiEdit3,
-} from 'react-icons/fi';
-import { RiChat3Line, RiRobot2Line, RiSparklingLine } from 'react-icons/ri';
+  Plus, Search, Settings, Trash2, Pin,
+  LogOut, ChevronLeft, MessageSquare,
+  LayoutDashboard, FileText, Zap, Cpu, PenSquare, Bot, Sparkles
+} from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -23,18 +22,18 @@ const NAV_SECTIONS = [
   {
     label: 'MAIN NAVIGATION',
     items: [
-      { icon: <FiLayout size={15} />,      label: 'Dashboard',      href: '/' },
-      { icon: <FiEdit3 size={15} />,       label: 'New Chat',       action: 'new' },
-      { icon: <FiFileText size={15} />,    label: 'Conversations',  href: '/' },
-      { icon: <RiSparklingLine size={15}/>, label: 'AI Assistant',   href: '/', active: true },
+      { icon: <LayoutDashboard size={15} />, label: 'Dashboard',      href: '/' },
+      { icon: <PenSquare size={15} />,       label: 'New Chat',       action: 'new' },
+      { icon: <FileText size={15} />,        label: 'Conversations',  href: '/' },
+      { icon: <Sparkles size={15} />,        label: 'AI Assistant',   href: '/', active: true },
     ],
   },
   {
     label: 'TOOLS',
     items: [
-      { icon: <FiZap size={15} />,         label: 'Quick Prompts',  href: '/' },
-      { icon: <FiCpu size={15} />,         label: 'Models',         href: '/settings/models' },
-      { icon: <FiSettings size={15} />,    label: 'Settings',       href: '/settings/profile' },
+      { icon: <Zap size={15} />,             label: 'Quick Prompts',  href: '/' },
+      { icon: <Cpu size={15} />,             label: 'Models',         href: '/settings/models' },
+      { icon: <Settings size={15} />,        label: 'Settings',       href: '/settings/profile' },
     ],
   },
 ];
@@ -108,7 +107,7 @@ export default function Sidebar() {
                 color: 'white',
                 fontSize: 15, fontWeight: 700,
               }}>
-                <RiRobot2Line />
+                <Bot size={16} />
               </div>
               <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-heading)' }}>
                 CleverChat
@@ -123,14 +122,14 @@ export default function Sidebar() {
               }}
               title="Collapse sidebar"
             >
-              <FiChevronLeft size={17} />
+              <ChevronLeft size={17} />
             </button>
           </div>
 
           {/* ── Search ────────────────────────────────────────── */}
           <div style={{ padding: '4px 12px 8px' }}>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <FiSearch size={13} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+              <Search size={13} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)', pointerEvents: 'none' }} />
               <input
                 type="text"
                 placeholder="Search"
@@ -234,11 +233,11 @@ export default function Sidebar() {
                         if (activeConversationId !== conv.id) e.currentTarget.style.background = 'transparent';
                       }}
                     >
-                      <RiChat3Line size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                         {conv.title}
                       </span>
-                      {conv.is_pinned && <FiMapPin size={11} style={{ color: 'var(--accent-warning)', flexShrink: 0 }} />}
+                      {conv.is_pinned && <Pin size={11} style={{ color: 'var(--accent-warning)', flexShrink: 0 }} />}
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDelete(conv.id); }}
@@ -250,7 +249,7 @@ export default function Sidebar() {
                       }}
                       className="conv-delete-btn"
                     >
-                      <FiTrash2 size={12} />
+                      <Trash2 size={12} />
                     </button>
                   </div>
                 ))}
@@ -261,48 +260,6 @@ export default function Sidebar() {
                 {search ? 'No conversations found' : 'No chats yet — start a new one!'}
               </div>
             )}
-          </div>
-
-          {/* ── Premium Card ──────────────────────────────────── */}
-          <div style={{ padding: '8px 12px' }}>
-            <div style={{
-              borderRadius: 'var(--radius-lg)',
-              background: 'linear-gradient(135deg, #eef2ff 0%, #fdf4ff 50%, #fff7ed 100%)',
-              border: '1px solid #e0e7ff',
-              padding: '14px 14px 12px',
-              position: 'relative',
-              overflow: 'hidden',
-            }}>
-              {/* deco blob */}
-              <div style={{
-                position: 'absolute', top: -12, right: -12,
-                width: 60, height: 60,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, rgba(99,102,241,.15), rgba(168,85,247,.15))',
-                filter: 'blur(12px)',
-              }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: 'var(--radius-sm)',
-                  background: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <RiRobot2Line size={14} color="white" />
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>Premium</span>
-              </div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10, lineHeight: 1.4 }}>
-                Unlock all models and advanced features
-              </div>
-              <button style={{
-                fontSize: 12, fontWeight: 500,
-                padding: '5px 12px',
-                background: '#111827', color: 'white',
-                border: 'none', borderRadius: 'var(--radius-pill)',
-                cursor: 'pointer',
-              }}>
-                Upgrade Now
-              </button>
-            </div>
           </div>
 
           {/* ── User Profile ──────────────────────────────────── */}
@@ -331,7 +288,7 @@ export default function Sidebar() {
                 </div>
               </div>
               <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 'var(--radius-sm)', display: 'flex' }} title="Logout">
-                <FiLogOut size={15} />
+                <LogOut size={15} />
               </button>
             </div>
           )}

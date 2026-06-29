@@ -7,23 +7,16 @@
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { RiRobot2Line, RiSparklingLine, RiImageLine } from 'react-icons/ri';
-import { FiEdit3, FiZap, FiCode, FiFileText, FiCpu, FiSend, FiPaperclip } from 'react-icons/fi';
-import { TbBrain } from 'react-icons/tb';
-import { MdOutlineImageSearch } from 'react-icons/md';
+import {
+  PenSquare, Sparkles, FileText, Code2, Bot
+} from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import InputBar from '@/components/chat/InputBar';
 import { staggerContainer, fadeInUp } from '@/lib/motion';
 
-const ACTION_CHIPS = [
-  { icon: <TbBrain size={14} />,        label: 'Reasoning' },
-  { icon: <RiImageLine size={14} />,    label: 'Create Image' },
-  { icon: <MdOutlineImageSearch size={14} />, label: 'Deep Research' },
-];
-
 const SUGGESTION_CARDS = [
   {
-    icon: <FiEdit3 size={16} />,
+    icon: <PenSquare size={16} />,
     color: '#6366f1',
     bg: '#eef2ff',
     title: 'Write Content',
@@ -31,7 +24,7 @@ const SUGGESTION_CARDS = [
     prompt: 'Help me write a compelling blog post about',
   },
   {
-    icon: <RiSparklingLine size={16} />,
+    icon: <Sparkles size={16} />,
     color: '#ec4899',
     bg: '#fdf2f8',
     title: 'Creative Ideas',
@@ -39,7 +32,7 @@ const SUGGESTION_CARDS = [
     prompt: 'Give me 5 creative headline ideas for',
   },
   {
-    icon: <FiFileText size={16} />,
+    icon: <FileText size={16} />,
     color: '#f59e0b',
     bg: '#fffbeb',
     title: 'Summarize Text',
@@ -47,7 +40,7 @@ const SUGGESTION_CARDS = [
     prompt: 'Please summarize the following text:',
   },
   {
-    icon: <FiCode size={16} />,
+    icon: <Code2 size={16} />,
     color: '#10b981',
     bg: '#f0fdf4',
     title: 'Code Assistant',
@@ -97,7 +90,7 @@ export default function HomePage() {
             boxShadow: '0 8px 32px rgba(0,0,0,.15), inset 0 1px 0 rgba(255,255,255,.08)',
           }}
         >
-          <RiRobot2Line />
+          <Bot size={32} />
         </motion.div>
 
         {/* ── Greeting ────────────────────────────────────── */}
@@ -159,15 +152,15 @@ export default function HomePage() {
               onClick={() => {}}
               style={{
                 background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
+                border: '1px solid rgba(0, 0, 0, 0.05)',
                 borderRadius: 'var(--radius-lg)',
                 padding: '16px 14px',
                 cursor: 'pointer',
                 textAlign: 'left',
                 transition: 'all var(--transition-normal)',
-                boxShadow: 'var(--shadow-card)',
+                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.01)',
               }}
-              whileHover={{ y: -2, boxShadow: '0 6px 20px rgba(0,0,0,.08)', borderColor: 'var(--border-default)' }}
+              whileHover={{ y: -3, boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05)', borderColor: 'rgba(0, 0, 0, 0.08)' }}
               whileTap={{ scale: 0.98 }}
             >
               {/* Icon */}
