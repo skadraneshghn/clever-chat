@@ -1,0 +1,12 @@
+{
+  "apps": [
+    {
+      "app_id": "app_1c78b536-717b-4645-9eb5-a4bf08512cc4",
+      "org_id": "user_dda79ac5-c8e0-4767-b2b6-73f5a180dc73",
+      "deploy_url": "https://github.com/skadraneshghn/clever-chat.git",
+      "git_ssh_url": "https://github.com/skadraneshghn/clever-chat.git",
+      "name": "clever-chat",
+      "alias": "clever-chat"
+    }
+  ]
+}

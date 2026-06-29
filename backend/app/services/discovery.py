@@ -22,6 +22,14 @@ def _detect_capabilities(model_id: str) -> dict:
         "function_calling": any(kw in mid for kw in ("gpt-", "claude-", "mistral", "command")),
     }
 
+def is_chat_model(model_id: str) -> bool:
+    """Filter out non-chat models (embeddings, reward models, safety guards, etc.)."""
+    mid = model_id.lower()
+    non_chat_keywords = (
+        "embed", "clip", "safety", "guard", "reward", "detector",
+        "retriever", "parse", "topic-control", "rerank", "classifier"
+    )
+    return not any(kw in mid for kw in non_chat_keywords)
 
 def _make_display_name(model_id: str) -> str:
     """Parse a model identifier into a human-friendly display name."""
@@ -45,7 +53,7 @@ async def discover_ollama(base_url: str) -> list[dict]:
     models = []
     for entry in data.get("models", []):
         model_id = entry.get("name", "")
-        if not model_id:
+        if not model_id or not is_chat_model(model_id):
             continue
         models.append({
             "model_id": model_id,
@@ -92,7 +100,7 @@ async def discover_openai_compatible(base_url: str, api_key: str | None = None) 
     models = []
     for entry in raw_models:
         model_id = entry.get("id", "") if isinstance(entry, dict) else str(entry)
-        if not model_id:
+        if not model_id or not is_chat_model(model_id):
             continue
         models.append({
             "model_id": model_id,

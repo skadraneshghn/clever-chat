@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.discovered_model import DiscoveredModel
 from app.models.provider_connection import ProviderConnection
-from app.services.discovery import discover_models
+from app.services.discovery import discover_models, is_chat_model
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/providers", tags=["Providers"])
@@ -148,6 +148,7 @@ async def list_available_models(
             is_active=model.is_active,
         )
         for model, conn in rows
+        if is_chat_model(model.model_id)
     ]
 
 
