@@ -170,21 +170,59 @@ export interface MediaAsset {
   height?: number;
 }
 
-// ── Models ──────────────────────────────────────────────────────────────────
+// ── Provider Connections ────────────────────────────────────────────────────
 
-export interface AIModel {
+export type ProviderType = 'openai' | 'ollama' | 'nvidia' | 'generic_openai_compatible';
+
+export interface DiscoveredModel {
   id: string;
-  name: string;
-  provider: 'openai' | 'anthropic' | 'google';
-  description: string;
-  maxTokens: number;
-  icon?: string;
+  connection_id: string;
+  model_id: string;
+  display_name: string;
+  is_active: boolean;
+  capabilities: {
+    vision?: boolean;
+    reasoning?: boolean;
+    function_calling?: boolean;
+  } | null;
+  created_at: string;
 }
 
-export const AVAILABLE_MODELS: AIModel[] = [
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', description: 'Most capable OpenAI model', maxTokens: 128000 },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', description: 'Fast and affordable', maxTokens: 128000 },
-  { id: 'o4-mini', name: 'o4 Mini', provider: 'openai', description: 'Reasoning model', maxTokens: 128000 },
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', description: 'Balanced performance', maxTokens: 200000 },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', description: 'Fast responses', maxTokens: 200000 },
-];
+export interface ProviderConnection {
+  id: string;
+  name: string;
+  provider_type: ProviderType;
+  base_url: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  model_count: number;
+  models: DiscoveredModel[];
+}
+
+export interface ProviderSyncResponse {
+  connection: ProviderConnection;
+  discovered_count: number;
+}
+
+export interface AvailableModel {
+  id: string;
+  model_id: string;
+  display_name: string;
+  provider_type: ProviderType;
+  provider_name: string;
+  connection_id: string;
+  capabilities: {
+    vision?: boolean;
+    reasoning?: boolean;
+    function_calling?: boolean;
+  } | null;
+  is_active: boolean;
+}
+
+export interface ProviderConnectionCreate {
+  name: string;
+  provider_type: ProviderType;
+  base_url: string;
+  api_key?: string | null;
+}

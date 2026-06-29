@@ -4,28 +4,59 @@
    ChatHeader — Katteb-style: breadcrumb left, search center, actions right
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Settings, Bell, Share2, Sun, Moon, ChevronRight, Bot } from 'lucide-react';
+import { Search, Plus, Settings, Bell, Share2, Sun, Moon, ChevronRight, Bot, Server, Cloud, Cpu, Globe } from 'lucide-react';
 import { usePreferencesStore } from '@/stores/preferencesStore';
+import { useProviderStore } from '@/stores/providerStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { AVAILABLE_MODELS } from '@/types';
 import { dropdownVariants } from '@/lib/motion';
+import type { ProviderType } from '@/types';
+
+function getProviderIcon(providerType: ProviderType) {
+  switch (providerType) {
+    case 'openai': return <Cloud size={13} />;
+    case 'ollama': return <Server size={13} />;
+    case 'nvidia': return <Cpu size={13} />;
+    default: return <Globe size={13} />;
+  }
+}
 
 export default function ChatHeader() {
   const { preferences, updatePreferences } = usePreferencesStore();
+  const { availableModels, fetchAvailableModels } = useProviderStore();
   const { resetChat } = useChatStore();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [modelOpen, setModelOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const currentModel = AVAILABLE_MODELS.find((m) => m.id === preferences.default_model_id) || AVAILABLE_MODELS[0];
+  useEffect(() => {
+    fetchAvailableModels();
+  }, [fetchAvailableModels]);
 
-  function getProviderIcon(provider: string) {
-    return <Bot size={13} />;
-  }
+  const currentModel = availableModels.find((m) => m.model_id === preferences.default_model_id);
+  const currentModelName = currentModel?.display_name || preferences.default_model_id || 'Select Model';
+  const currentProviderType = currentModel?.provider_type || 'openai';
+
+  // Filter models by search
+  const filteredModels = searchQuery
+    ? availableModels.filter((m) =>
+        m.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.model_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.provider_name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : availableModels;
+
+  // Group by provider
+  const grouped = filteredModels.reduce<Record<string, typeof filteredModels>>((acc, model) => {
+    const key = model.provider_name;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(model);
+    return acc;
+  }, {});
 
   function handleNewChat() {
     resetChat();
@@ -62,8 +93,8 @@ export default function ChatHeader() {
               transition: 'all var(--transition-fast)',
             }}
           >
-            {getProviderIcon(currentModel.provider)}
-            <span>{currentModel.name}</span>
+            {getProviderIcon(currentProviderType)}
+            <span>{currentModelName}</span>
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ opacity: .45 }}>
               <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -72,7 +103,7 @@ export default function ChatHeader() {
           <AnimatePresence>
             {modelOpen && (
               <>
-                <div onClick={() => setModelOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                <div onClick={() => { setModelOpen(false); setSearchQuery(''); }} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
                 <motion.div
                   variants={dropdownVariants}
                   initial="hidden" animate="visible" exit="exit"
@@ -82,31 +113,120 @@ export default function ChatHeader() {
                     border: '1px solid var(--border-default)',
                     borderRadius: 'var(--radius-lg)',
                     boxShadow: 'var(--shadow-lg)',
-                    padding: 6, minWidth: 260, zIndex: 50,
+                    padding: 6, minWidth: 300, maxHeight: 420, zIndex: 50,
+                    display: 'flex', flexDirection: 'column',
                   }}
                 >
-                  {AVAILABLE_MODELS.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => { updatePreferences({ default_model_id: model.id }); setModelOpen(false); }}
+                  {/* Search inside dropdown */}
+                  <div style={{ padding: '4px 6px 8px' }}>
+                    <input
+                      type="text"
+                      placeholder="Search models..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      autoFocus
                       style={{
-                        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '9px 12px', fontSize: 13,
-                        color: model.id === preferences.default_model_id ? 'var(--accent-primary)' : 'var(--text-primary)',
-                        background: model.id === preferences.default_model_id ? 'var(--accent-primary-soft)' : 'transparent',
-                        border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                        textAlign: 'left', transition: 'all var(--transition-fast)',
+                        width: '100%', padding: '7px 10px', fontSize: 12,
+                        color: 'var(--text-primary)', background: 'var(--bg-input)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-md)', outline: 'none',
                       }}
-                      onMouseEnter={(e) => { if (model.id !== preferences.default_model_id) e.currentTarget.style.background = 'var(--surface-1)'; }}
-                      onMouseLeave={(e) => { if (model.id !== preferences.default_model_id) e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      {getProviderIcon(model.provider)}
-                      <div>
-                        <div style={{ fontWeight: 500 }}>{model.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{model.description}</div>
+                    />
+                  </div>
+
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {availableModels.length === 0 ? (
+                      <div style={{ padding: '20px 12px', textAlign: 'center' }}>
+                        <Bot size={24} style={{ color: 'var(--text-muted)', marginBottom: 8 }} />
+                        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
+                          No models available
+                        </div>
+                        <button
+                          onClick={() => { router.push('/settings/connections'); setModelOpen(false); }}
+                          style={{
+                            fontSize: 12, fontWeight: 600,
+                            color: 'var(--accent-primary)',
+                            background: 'none', border: 'none',
+                            cursor: 'pointer', textDecoration: 'underline',
+                          }}
+                        >
+                          Add a connection →
+                        </button>
                       </div>
-                    </button>
-                  ))}
+                    ) : Object.keys(grouped).length === 0 ? (
+                      <div style={{ padding: '16px 12px', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+                        No models match &ldquo;{searchQuery}&rdquo;
+                      </div>
+                    ) : (
+                      Object.entries(grouped).map(([providerName, models]) => (
+                        <div key={providerName}>
+                          <div style={{
+                            fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                            padding: '6px 12px 4px',
+                          }}>
+                            {providerName}
+                          </div>
+                          {models.map((model) => (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                updatePreferences({ default_model_id: model.model_id });
+                                setModelOpen(false);
+                                setSearchQuery('');
+                              }}
+                              style={{
+                                width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                                padding: '8px 12px', fontSize: 13,
+                                color: model.model_id === preferences.default_model_id ? 'var(--accent-primary)' : 'var(--text-primary)',
+                                background: model.model_id === preferences.default_model_id ? 'var(--accent-primary-soft)' : 'transparent',
+                                border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                                textAlign: 'left', transition: 'all var(--transition-fast)',
+                              }}
+                              onMouseEnter={(e) => { if (model.model_id !== preferences.default_model_id) e.currentTarget.style.background = 'var(--surface-1)'; }}
+                              onMouseLeave={(e) => { if (model.model_id !== preferences.default_model_id) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              {getProviderIcon(model.provider_type)}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 500, fontSize: 13 }}>{model.display_name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {model.model_id}
+                                </div>
+                              </div>
+                              {model.capabilities?.vision && (
+                                <span style={{ fontSize: 9, color: '#8b5cf6', fontWeight: 600 }}>👁</span>
+                              )}
+                              {model.capabilities?.reasoning && (
+                                <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 600 }}>⚡</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Footer link to connections */}
+                  {availableModels.length > 0 && (
+                    <div style={{ borderTop: '1px solid var(--border-subtle)', padding: '6px' }}>
+                      <button
+                        onClick={() => { router.push('/settings/connections'); setModelOpen(false); }}
+                        style={{
+                          width: '100%', padding: '7px 12px', fontSize: 12,
+                          color: 'var(--text-muted)',
+                          background: 'none', border: 'none',
+                          borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'all var(--transition-fast)',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                      >
+                        <Plus size={12} style={{ display: 'inline', marginRight: 6 }} />
+                        Manage connections...
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               </>
             )}

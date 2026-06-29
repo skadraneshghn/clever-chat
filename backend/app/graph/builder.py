@@ -14,10 +14,10 @@ from app.graph.state import AgentState
 def _route_after_llm(state: AgentState) -> str:
     """Conditional routing after LLM response."""
     finish_reason = state.get("finish_reason", "stop")
-    
+
     if finish_reason == "error":
         return "response_finalizer"
-    
+
     # Check for tool calls (future: route to tool_executor)
     # For now, always go to response_finalizer
     return "response_finalizer"
@@ -35,13 +35,13 @@ def build_graph() -> StateGraph:
         - error_handler (retry logic)
     """
     graph = StateGraph(AgentState)
-    
+
     # Add nodes
     graph.add_node("input_validator", input_validator)
     graph.add_node("prompt_builder", prompt_builder)
     graph.add_node("llm_caller", llm_caller)
     graph.add_node("response_finalizer", response_finalizer)
-    
+
     # Define edges
     graph.set_entry_point("input_validator")
     graph.add_edge("input_validator", "prompt_builder")
@@ -50,7 +50,7 @@ def build_graph() -> StateGraph:
         "response_finalizer": "response_finalizer",
     })
     graph.add_edge("response_finalizer", END)
-    
+
     return graph
 
 

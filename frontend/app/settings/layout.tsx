@@ -8,13 +8,14 @@ import { useRouter, usePathname } from 'next/navigation';
 import { motion } from 'motion/react';
 import {
   FiUser, FiSliders, FiCpu, FiLayout, FiDatabase,
-  FiArrowLeft,
+  FiArrowLeft, FiLink,
 } from 'react-icons/fi';
 import { fadeInUp } from '@/lib/motion';
 
 const navItems = [
   { href: '/settings/profile', icon: <FiUser size={18} />, label: 'Profile' },
   { href: '/settings/preferences', icon: <FiSliders size={18} />, label: 'Preferences' },
+  { href: '/settings/connections', icon: <FiLink size={18} />, label: 'Connections' },
   { href: '/settings/models', icon: <FiCpu size={18} />, label: 'AI Models' },
   { href: '/settings/data', icon: <FiDatabase size={18} />, label: 'Data' },
 ];

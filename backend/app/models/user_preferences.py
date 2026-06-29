@@ -20,6 +20,7 @@ class UserPreferences(Base):
         primary_key=True,
     )
     theme: Mapped[str] = mapped_column(String(16), nullable=False, default="dark")
+    color_theme: Mapped[str] = mapped_column(String(32), nullable=False, default="indigo")
     sidebar_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="expanded")
     default_model_id: Mapped[str] = mapped_column(String(64), nullable=False, default="gpt-4o")
     default_temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
@@ -34,6 +35,7 @@ class UserPreferences(Base):
     )  # all / last_n / auto
     enable_rag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     message_width: Mapped[str] = mapped_column(String(8), nullable=False, default="md")
+    chat_bg_pattern: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
         server_default=func.now(), onupdate=lambda: datetime.now(UTC),

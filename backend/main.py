@@ -7,13 +7,13 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.media import router as media_router
 from app.api.preferences import router as preferences_router
+from app.api.providers import router as providers_router
 from app.core.config import get_settings
 from app.core.database import close_db, init_db
 from app.core.process_pool import init_process_pool, shutdown_process_pool
@@ -60,8 +60,19 @@ async def lifespan(app: FastAPI):
 
     # 2. Create required PostgreSQL extensions + tables
     from app.core.database import Base, get_engine
+
     # Import all models to register them with SQLAlchemy metadata
-    from app.models import conversation, embeddings, media_asset, message, session, user, user_preferences  # noqa: F401
+    from app.models import (  # noqa: F401
+        conversation,
+        discovered_model,
+        embeddings,
+        media_asset,
+        message,
+        provider_connection,
+        session,
+        user,
+        user_preferences,
+    )
     try:
         async with get_engine().begin() as conn:
             # Enable extensions first (required before creating vector columns)
@@ -76,6 +87,20 @@ async def lifespan(app: FastAPI):
             )
             # Create all tables
             await conn.run_sync(Base.metadata.create_all)
+            # Ensure color_theme column exists
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS "
+                    "color_theme VARCHAR(32) NOT NULL DEFAULT 'indigo'"
+                )
+            )
+            # Ensure chat_bg_pattern column exists
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS "
+                    "chat_bg_pattern VARCHAR(32) NOT NULL DEFAULT 'none'"
+                )
+            )
         logger.info("database_tables_created")
     except Exception as exc:
         logger.error("database_setup_failed", error=str(exc))
@@ -139,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix=api_prefix)
     app.include_router(preferences_router, prefix=api_prefix)
     app.include_router(media_router, prefix=api_prefix)
+    app.include_router(providers_router, prefix=api_prefix)
 
     # ── Health Check ─────────────────────────────────────────────────────
 

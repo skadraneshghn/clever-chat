@@ -311,7 +311,7 @@ async def import_conversation(
 ):
     """Import a conversation from exported JSON."""
     conv_data = body.conversation
-    
+
     # Create new conversation
     conv = Conversation(
         user_id=user.id,
@@ -324,17 +324,17 @@ async def import_conversation(
 
     # Map old IDs to new IDs
     id_map: dict[str, uuid.UUID] = {}
-    
+
     for msg_data in conv_data.get("messages", []):
         old_id = msg_data.get("id", str(uuid.uuid4()))
         new_id = uuid.uuid4()
         id_map[old_id] = new_id
-    
+
     # Insert messages in order (parents before children)
     for msg_data in conv_data.get("messages", []):
         old_id = msg_data.get("id", str(uuid.uuid4()))
         old_parent = msg_data.get("parent_message_id")
-        
+
         msg = Message(
             id=id_map[old_id],
             conversation_id=conv.id,
@@ -344,6 +344,6 @@ async def import_conversation(
             is_active_branch=msg_data.get("is_active_branch", True),
         )
         db.add(msg)
-    
+
     await db.flush()
     return _conv_to_response(conv)

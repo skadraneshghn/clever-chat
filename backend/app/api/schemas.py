@@ -7,7 +7,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-
 # ── Auth Schemas ─────────────────────────────────────────────────────────────
 
 
@@ -129,6 +128,7 @@ class ChatStreamRequest(BaseModel):
 
 class PreferencesResponse(BaseModel):
     theme: str
+    color_theme: str
     sidebar_mode: str
     default_model_id: str
     default_temperature: float
@@ -141,12 +141,14 @@ class PreferencesResponse(BaseModel):
     context_strategy: str
     enable_rag: bool
     message_width: str
+    chat_bg_pattern: str
 
     model_config = {"from_attributes": True}
 
 
 class PreferencesUpdate(BaseModel):
     theme: str | None = None
+    color_theme: str | None = None
     sidebar_mode: str | None = None
     default_model_id: str | None = None
     default_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
@@ -159,6 +161,7 @@ class PreferencesUpdate(BaseModel):
     context_strategy: str | None = None
     enable_rag: bool | None = None
     message_width: str | None = None
+    chat_bg_pattern: str | None = None
 
 
 # ── Export / Import Schemas ──────────────────────────────────────────────────
@@ -173,3 +176,77 @@ class ExportConversation(BaseModel):
 class ImportConversation(BaseModel):
     schema_version: str
     conversation: dict
+
+
+# ── Provider Connection Schemas ──────────────────────────────────────────────
+
+
+class ProviderConnectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    provider_type: str = Field(
+        description="One of: openai, ollama, nvidia, generic_openai_compatible"
+    )
+    base_url: str = Field(min_length=1)
+    api_key: str | None = None  # Plain text — encrypted on the server
+
+    @field_validator("provider_type")
+    @classmethod
+    def validate_provider_type(cls, v: str) -> str:
+        allowed = {"openai", "ollama", "nvidia", "generic_openai_compatible"}
+        if v not in allowed:
+            raise ValueError(f"provider_type must be one of {allowed}")
+        return v
+
+
+class ProviderConnectionUpdate(BaseModel):
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    is_active: bool | None = None
+
+
+class DiscoveredModelResponse(BaseModel):
+    id: uuid.UUID
+    connection_id: uuid.UUID
+    model_id: str
+    display_name: str
+    is_active: bool
+    capabilities: dict | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ProviderConnectionResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    provider_type: str
+    base_url: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    model_count: int = 0
+    models: list[DiscoveredModelResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+class ProviderSyncResponse(BaseModel):
+    """Returned after creating/syncing a provider — includes discovered models."""
+    connection: ProviderConnectionResponse
+    discovered_count: int
+
+
+class AvailableModelResponse(BaseModel):
+    """Flat model item for the model selector dropdown."""
+    id: uuid.UUID
+    model_id: str
+    display_name: str
+    provider_type: str
+    provider_name: str
+    connection_id: uuid.UUID
+    capabilities: dict | None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+

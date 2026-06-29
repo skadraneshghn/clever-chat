@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -44,7 +43,7 @@ async def chat_stream(
     """
     settings = get_settings()
     start_time = time.monotonic()
-    
+
     # Get or create conversation
     if body.conversation_id:
         result = await db.execute(
@@ -65,10 +64,10 @@ async def chat_stream(
         )
         db.add(conversation)
         await db.flush()
-    
+
     # Save user message
     content_blocks = [{"type": "text", "text": body.message}]
-    
+
     user_message = Message(
         conversation_id=conversation.id,
         parent_message_id=body.parent_message_id,
@@ -77,7 +76,7 @@ async def chat_stream(
     )
     db.add(user_message)
     await db.flush()
-    
+
     # Load conversation history
     result = await db.execute(
         select(Message)
@@ -88,7 +87,7 @@ async def chat_stream(
         .order_by(Message.created_at)
     )
     history_messages = result.scalars().all()
-    
+
     # Convert to LangChain messages
     lc_messages = []
     for msg in history_messages:
@@ -98,7 +97,7 @@ async def chat_stream(
         elif msg.role == "assistant":
             from langchain_core.messages import AIMessage
             lc_messages.append(AIMessage(content=text))
-    
+
     # Build graph input
     graph_input = {
         "messages": lc_messages,
@@ -119,10 +118,10 @@ async def chat_stream(
         "output_tokens": 0,
         "finish_reason": "",
     }
-    
+
     # Commit the user message before streaming
     await db.commit()
-    
+
     async def event_generator():
         """Async generator yielding SSE events from LangGraph execution."""
         graph = get_compiled_graph()
@@ -130,7 +129,7 @@ async def chat_stream(
         input_tokens = 0
         output_tokens = 0
         ai_message_id = uuid.uuid4()
-        
+
         try:
             # Send conversation metadata
             yield await _sse_event("message_start", {
@@ -138,11 +137,11 @@ async def chat_stream(
                 "message_id": str(ai_message_id),
                 "user_message_id": str(user_message.id),
             })
-            
+
             # Stream from LangGraph
             async for event in graph.astream_events(graph_input, version="v2"):
                 kind = event.get("event", "")
-                
+
                 # Stream tokens from LLM
                 if kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
@@ -153,7 +152,7 @@ async def chat_stream(
                             yield await _sse_event("token", {
                                 "content": token,
                             })
-                
+
                 # Node execution events
                 elif kind == "on_chain_start":
                     node_name = event.get("name", "")
@@ -161,7 +160,7 @@ async def chat_stream(
                         yield await _sse_event("node_start", {
                             "node": node_name,
                         })
-                
+
                 elif kind == "on_chain_end":
                     node_name = event.get("name", "")
                     output = event.get("data", {}).get("output", {})
@@ -172,10 +171,10 @@ async def chat_stream(
                         yield await _sse_event("node_end", {
                             "node": node_name,
                         })
-            
+
             # Calculate latency
             latency_ms = int((time.monotonic() - start_time) * 1000)
-            
+
             # Persist AI message
             from app.core.database import get_db_context
             async with get_db_context() as save_db:
@@ -191,7 +190,7 @@ async def chat_stream(
                     latency_ms=latency_ms,
                 )
                 save_db.add(ai_message)
-                
+
                 # Auto-generate title from first message
                 if len(history_messages) <= 1 and full_response:
                     title = body.message[:80].strip()
@@ -200,7 +199,7 @@ async def chat_stream(
                     conv = await save_db.get(Conversation, conversation.id)
                     if conv and conv.title == "New Chat":
                         conv.title = title
-            
+
             # Send completion event
             yield await _sse_event("message_meta", {
                 "message_id": str(ai_message_id),
@@ -210,7 +209,7 @@ async def chat_stream(
                 "model_id": graph_input["model_id"],
             })
             yield await _sse_event("done", {"finish_reason": "stop"})
-            
+
         except Exception as e:
             logger.error("stream_error", error=str(e), conversation_id=str(conversation.id))
             yield await _sse_event("error", {
@@ -218,7 +217,7 @@ async def chat_stream(
                 "message": str(e),
                 "recoverable": False,
             })
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -246,14 +245,14 @@ async def get_chat_history(
     )
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Conversation not found")
-    
+
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at)
     )
     messages = result.scalars().all()
-    
+
     return [
         MessageResponse(
             id=msg.id,
@@ -287,5 +286,5 @@ async def delete_message(
     message = result.scalar_one_or_none()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
-    
+
     await db.delete(message)

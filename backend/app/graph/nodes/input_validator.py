@@ -15,16 +15,16 @@ async def input_validator(state: AgentState) -> dict:
     - Attaches any media references
     """
     messages = state.get("messages", [])
-    
+
     if not messages:
         return {"finish_reason": "error"}
-    
+
     last_msg = messages[-1]
-    
+
     # Basic validation — ensure it's a user message
     if not isinstance(last_msg, HumanMessage):
         return {"finish_reason": "error"}
-    
+
     # Determine if retrieval is needed (heuristic: messages with question marks,
     # or conversations with > 3 messages suggesting context might help)
     content = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)
@@ -33,7 +33,7 @@ async def input_validator(state: AgentState) -> dict:
         "?" in content or
         len(messages) > 6
     )
-    
+
     return {
         "needs_retrieval": needs_retrieval,
         "media_refs": state.get("media_refs", []),
