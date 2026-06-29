@@ -2,7 +2,7 @@
    API Client — Axios-like fetch wrapper with JWT interceptors
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 const API_PREFIX = '/api/v1';
 
 class ApiClient {

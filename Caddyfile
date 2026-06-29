@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CleverChat — Caddy Reverse Proxy Configuration
+# Routes:
+#   /api/*   → Backend (FastAPI/Gunicorn) on :8081
+#   /health  → Backend health endpoint on :8081
+#   /docs    → Backend Swagger docs on :8081
+#   /redoc   → Backend ReDoc on :8081
+#   /openapi.json → Backend OpenAPI schema on :8081
+#   /*       → Frontend (Next.js standalone) on :3000
+# ═══════════════════════════════════════════════════════════════════════════
+
+:{$PORT:8080} {
+    # API routes → backend
+    handle /api/* {
+        reverse_proxy localhost:8081
+    }
+
+    # Backend utilities
+    handle /health {
+        reverse_proxy localhost:8081
+    }
+    handle /docs {
+        reverse_proxy localhost:8081
+    }
+    handle /redoc {
+        reverse_proxy localhost:8081
+    }
+    handle /openapi.json {
+        reverse_proxy localhost:8081
+    }
+
+    # Everything else → frontend
+    handle {
+        reverse_proxy localhost:3000
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}
