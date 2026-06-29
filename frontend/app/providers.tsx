@@ -7,6 +7,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
+import { usePreferencesStore } from '@/stores/preferencesStore';
+import { colorThemes } from '@/lib/themes';
+import { useTheme } from 'next-themes';
 import { ToastProvider } from '@/components/Toast';
 
 const queryClient = new QueryClient({
@@ -17,6 +20,41 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+function ColorThemeInjector() {
+  const { preferences, fetchPreferences } = usePreferencesStore();
+  const { resolvedTheme } = useTheme();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchPreferences();
+    }
+  }, [isAuthenticated, fetchPreferences]);
+
+  useEffect(() => {
+    const colorTheme = preferences.color_theme || 'indigo';
+    const isDark = resolvedTheme === 'dark';
+    const vars = colorThemes[colorTheme]?.[isDark ? 'dark' : 'light'];
+    
+    if (vars) {
+      const root = document.documentElement;
+      
+      // Clean previous layout overrides if any
+      const layoutKeys = ['--bg-primary', '--bg-secondary', '--bg-sidebar', '--text-primary', '--text-heading'];
+      layoutKeys.forEach((key) => {
+        root.style.removeProperty(key);
+      });
+
+      // Inject theme variables
+      Object.entries(vars).forEach(([name, val]) => {
+        root.style.setProperty(name, val);
+      });
+    }
+  }, [preferences.color_theme, resolvedTheme]);
+
+  return null;
+}
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore((s) => s.hydrate);
@@ -51,6 +89,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+        <ColorThemeInjector />
         {children}
       </ToastProvider>
     </QueryClientProvider>

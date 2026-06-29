@@ -52,11 +52,12 @@ export default function ChatHeader() {
             onClick={() => setModelOpen(!modelOpen)}
             style={{
               display: 'flex', alignItems: 'center', gap: 7,
-              padding: '5px 11px', fontSize: 13, fontWeight: 500,
+              padding: '6px 14px', fontSize: 13, fontWeight: 500,
               color: 'var(--text-primary)',
-              background: 'var(--surface-1)',
+              background: 'var(--bg-secondary)',
               border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
+              borderRadius: 'var(--radius-pill)',
+              boxShadow: 'var(--shadow-xs)',
               cursor: 'pointer',
               transition: 'all var(--transition-fast)',
             }}
@@ -124,58 +125,107 @@ export default function ChatHeader() {
         flex: 1, maxWidth: 380,
         position: 'relative', display: 'flex', alignItems: 'center',
       }}>
-        <Search size={13} style={{ position: 'absolute', left: 11, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <Search size={13} style={{ position: 'absolute', left: 14, color: 'var(--text-muted)', pointerEvents: 'none' }} />
         <input
           type="text"
           placeholder="Search"
           style={{
-            width: '100%', padding: '7px 44px 7px 32px', fontSize: 13,
-            color: 'var(--text-primary)', background: 'var(--surface-1)',
-            border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', outline: 'none',
+            width: '100%', padding: '7px 44px 7px 34px', fontSize: 13,
+            color: 'var(--text-primary)', background: 'var(--bg-input)',
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-pill)', outline: 'none',
           }}
         />
         <span style={{
-          position: 'absolute', right: 9, fontSize: 10.5, color: 'var(--text-muted)',
+          position: 'absolute', right: 10, fontSize: 10.5, color: 'var(--text-muted)',
           fontFamily: 'monospace', background: 'var(--bg-secondary)',
           padding: '1px 5px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-subtle)',
         }}>⌘P</span>
       </div>
 
       {/* Right: Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {/* Theme toggle */}
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-xs)',
+            color: 'var(--text-secondary)',
+            padding: '8px',
+            cursor: 'pointer',
+            display: 'flex',
+            transition: 'all var(--transition-fast)',
+          }}
           title="Toggle theme"
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card-hover)';
+            e.currentTarget.style.borderColor = 'var(--border-strong)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card)';
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+          }}
         >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </button>
 
         {/* Settings */}
         <button
           onClick={() => router.push('/settings/profile')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-xs)',
+            color: 'var(--text-secondary)',
+            padding: '8px',
+            cursor: 'pointer',
+            display: 'flex',
+            transition: 'all var(--transition-fast)',
+          }}
           title="Settings"
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card-hover)';
+            e.currentTarget.style.borderColor = 'var(--border-strong)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card)';
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+          }}
         >
-          <Settings size={16} />
+          <Settings size={15} />
         </button>
 
         {/* Notifications */}
         <button
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', position: 'relative', transition: 'all var(--transition-fast)' }}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-xs)',
+            color: 'var(--text-secondary)',
+            padding: '8px',
+            cursor: 'pointer',
+            display: 'flex',
+            position: 'relative',
+            transition: 'all var(--transition-fast)',
+          }}
           title="Notifications"
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card-hover)';
+            e.currentTarget.style.borderColor = 'var(--border-strong)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card)';
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+          }}
         >
-          <Bell size={16} />
+          <Bell size={15} />
           {/* Notification dot */}
           <span style={{
-            position: 'absolute', top: 5, right: 5,
+            position: 'absolute', top: 3, right: 3,
             width: 6, height: 6, borderRadius: '50%',
             background: '#ef4444',
             border: '1.5px solid var(--bg-secondary)',
@@ -184,12 +234,33 @@ export default function ChatHeader() {
 
         {/* Share */}
         <button
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '7px', borderRadius: 'var(--radius-md)', display: 'flex', transition: 'all var(--transition-fast)' }}
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-xs)',
+            color: 'var(--text-secondary)',
+            padding: '6px 12px',
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            transition: 'all var(--transition-fast)',
+          }}
           title="Share"
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-1)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card-hover)';
+            e.currentTarget.style.borderColor = 'var(--border-strong)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--bg-card)';
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+          }}
         >
-          <Share2 size={16} />
+          <Share2 size={14} />
+          <span>Share</span>
         </button>
 
         {/* New Chat — primary pill button */}
@@ -197,15 +268,24 @@ export default function ChatHeader() {
           onClick={handleNewChat}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 16px', marginLeft: 6,
+            padding: '7px 16px', marginLeft: 4,
             fontSize: 13, fontWeight: 500,
             background: '#111827', color: 'white',
-            border: 'none', borderRadius: 'var(--radius-md)',
+            border: 'none', borderRadius: 'var(--radius-pill)',
+            boxShadow: 'var(--shadow-sm)',
             cursor: 'pointer', transition: 'all var(--transition-fast)',
             whiteSpace: 'nowrap',
           }}
-          onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'}
-          onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.opacity = '0.85';
+            e.currentTarget.style.transform = 'translateY(-0.5px)';
+            e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = '1';
+            e.currentTarget.style.transform = 'none';
+            e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+          }}
         >
           <Plus size={14} />
           New Chat

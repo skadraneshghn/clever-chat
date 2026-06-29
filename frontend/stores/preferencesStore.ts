@@ -15,6 +15,7 @@ interface PreferencesState {
 
 const defaultPreferences: UserPreferences = {
   theme: 'light',
+  color_theme: 'indigo',
   sidebar_mode: 'expanded',
   default_model_id: 'gpt-4o',
   default_temperature: 0.7,
@@ -27,6 +28,7 @@ const defaultPreferences: UserPreferences = {
   context_strategy: 'auto',
   enable_rag: true,
   message_width: 'md',
+  chat_bg_pattern: 'none',
 };
 
 export const usePreferencesStore = create<PreferencesState>((set, get) => ({

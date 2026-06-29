@@ -44,6 +44,7 @@ export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const { sidebarOpen, setSidebarOpen, isMobile, setMobileDrawerOpen } = useUIStore();
   const [search, setSearch] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
@@ -142,7 +143,7 @@ export default function Sidebar() {
                   color: 'var(--text-primary)',
                   background: 'var(--surface-1)',
                   border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-md)',
+                  borderRadius: 'var(--radius-pill)',
                   outline: 'none',
                   transition: 'all var(--transition-fast)',
                 }}
@@ -180,18 +181,24 @@ export default function Sidebar() {
                       width: '100%', display: 'flex', alignItems: 'center', gap: 10,
                       padding: '7px 10px', fontSize: 13.5,
                       color: item.active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      background: item.active ? 'var(--surface-1)' : 'transparent',
-                      border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      background: item.active ? 'var(--bg-active-menu)' : 'transparent',
+                      border: item.active ? '1px solid var(--border-active-menu)' : '1px solid transparent',
+                      boxShadow: item.active ? 'var(--shadow-active-menu)' : 'none',
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
                       textAlign: 'left', transition: 'all var(--transition-fast)',
                       fontWeight: item.active ? 500 : 400,
                     }}
                     onMouseEnter={(e) => {
-                      if (!item.active) e.currentTarget.style.background = 'var(--surface-1)';
-                      if (!item.active) e.currentTarget.style.color = 'var(--text-primary)';
+                      if (!item.active) {
+                        e.currentTarget.style.background = 'var(--surface-1)';
+                        e.currentTarget.style.color = 'var(--text-primary)';
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      if (!item.active) e.currentTarget.style.background = 'transparent';
-                      if (!item.active) e.currentTarget.style.color = 'var(--text-secondary)';
+                      if (!item.active) {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = 'var(--text-secondary)';
+                      }
                     }}
                   >
                     <span style={{ opacity: item.active ? 0.9 : 0.7 }}>{item.icon}</span>
@@ -221,16 +228,22 @@ export default function Sidebar() {
                         width: '100%', display: 'flex', alignItems: 'center', gap: 9,
                         padding: '7px 10px', fontSize: 13.5,
                         color: activeConversationId === conv.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        background: activeConversationId === conv.id ? 'var(--surface-1)' : 'transparent',
-                        border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                        background: activeConversationId === conv.id ? 'var(--bg-active-menu)' : 'transparent',
+                        border: activeConversationId === conv.id ? '1px solid var(--border-active-menu)' : '1px solid transparent',
+                        boxShadow: activeConversationId === conv.id ? 'var(--shadow-active-menu)' : 'none',
+                        borderRadius: 'var(--radius-md)', cursor: 'pointer',
                         textAlign: 'left', transition: 'all var(--transition-fast)',
                         fontWeight: activeConversationId === conv.id ? 500 : 400,
                       }}
                       onMouseEnter={(e) => {
-                        if (activeConversationId !== conv.id) e.currentTarget.style.background = 'var(--surface-1)';
+                        if (activeConversationId !== conv.id) {
+                          e.currentTarget.style.background = 'var(--surface-1)';
+                        }
                       }}
                       onMouseLeave={(e) => {
-                        if (activeConversationId !== conv.id) e.currentTarget.style.background = 'transparent';
+                        if (activeConversationId !== conv.id) {
+                          e.currentTarget.style.background = 'transparent';
+                        }
                       }}
                     >
                       <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
@@ -262,33 +275,158 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* ── User Profile ──────────────────────────────────── */}
+          {/* ── User Profile Menu Card ────────────────────────── */}
           {user && (
-            <div style={{
-              padding: '10px 12px 14px',
-              borderTop: '1px solid var(--border-subtle)',
-              display: 'flex', alignItems: 'center', gap: 10,
-            }}>
-              {/* Avatar */}
-              <div style={{
-                width: 34, height: 34,
-                borderRadius: 'var(--radius-pill)',
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'white', fontWeight: 600, fontSize: 13, flexShrink: 0,
-              }}>
-                {user.username.charAt(0).toUpperCase()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {user.username}
+            <div style={{ position: 'relative', padding: '0 8px 12px' }}>
+              {/* Floating Menu Popover */}
+              {menuOpen && (
+                <>
+                  {/* Click-outside backdrop */}
+                  <div
+                    onClick={() => setMenuOpen(false)}
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 90,
+                      cursor: 'default',
+                    }}
+                  />
+                  
+                  {/* Dropdown Card */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 'calc(100% + 4px)',
+                      left: 8,
+                      right: 8,
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      boxShadow: 'var(--shadow-lg)',
+                      padding: '6px',
+                      zIndex: 100,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                      animation: 'fade-in 0.15s ease-out',
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        router.push('/settings/profile');
+                      }}
+                      className="nav-item"
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 12px',
+                        border: 'none',
+                        background: 'transparent',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Settings size={15} style={{ color: 'var(--text-secondary)' }} />
+                      <span style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--text-primary)' }}>Profile Settings</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="nav-item"
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 12px',
+                        border: 'none',
+                        background: 'transparent',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        color: 'var(--accent-error)',
+                      }}
+                    >
+                      <LogOut size={15} style={{ color: 'var(--accent-error)' }} />
+                      <span style={{ fontSize: 13.5, fontWeight: 500 }}>Log Out</span>
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Profile Card Button */}
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '10px 14px',
+                  background: 'var(--bg-active-menu)',
+                  border: '1px solid var(--border-active-menu)',
+                  borderRadius: 'var(--radius-xl)',
+                  boxShadow: 'var(--shadow-active-menu)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = 'var(--shadow-card-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = 'var(--shadow-active-menu)';
+                }}
+              >
+                {/* Avatar */}
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  flexShrink: 0,
+                  boxShadow: 'var(--shadow-xs)',
+                }}>
+                  {user.username.charAt(0).toUpperCase()}
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {user.email}
+                
+                {/* Info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    color: 'var(--text-heading)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.25,
+                    marginBottom: 1,
+                  }}>
+                    {user.username}
+                  </div>
+                  <div style={{
+                    fontSize: 11.5,
+                    color: 'var(--text-secondary)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.25,
+                  }}>
+                    {user.email}
+                  </div>
                 </div>
-              </div>
-              <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 'var(--radius-sm)', display: 'flex' }} title="Logout">
-                <LogOut size={15} />
               </button>
             </div>
           )}

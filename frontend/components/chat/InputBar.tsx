@@ -1,17 +1,18 @@
 'use client';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   InputBar — Chat input with action buttons, model selector, file attach
+   InputBar — Chat input with redesigned capsule layout, model badge,
+   active file attachment state, and speech-to-text placeholder feature
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
-import { motion } from 'motion/react';
 import {
-  Send, Paperclip, Square, Sparkles, ImagePlus, LineChart
+  Plus, MinusCircle, Play, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { usePreferencesStore } from '@/stores/preferencesStore';
+import { toast } from 'sonner';
 
 interface InputBarProps {
   conversationId?: string | null;
@@ -20,30 +21,49 @@ interface InputBarProps {
 export default function InputBar({ conversationId }: InputBarProps) {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [attachments, setAttachments] = useState<{ id: string; name: string; type: string }[]>([
+    { id: '1', name: 'agreement', type: 'document' },
+    { id: '2', name: 'evidence', type: 'image' },
+    { id: '3', name: 'case files', type: 'folder' },
+  ]);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const { isStreaming } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences } = usePreferencesStore();
 
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed && attachments.length === 0) return;
+    if (isStreaming) return;
+
+    // Build message text including attachments info if any
+    let finalMessage = trimmed;
+    if (attachments.length > 0) {
+      const attachInfo = attachments.map(a => `[Attached: ${a.name} (${a.type})]`).join(' ');
+      finalMessage = `${attachInfo}\n${trimmed}`;
+    }
 
     sendMessage({
       conversation_id: conversationId || undefined,
-      message: trimmed,
+      message: finalMessage,
       model_id: preferences.default_model_id,
       temperature: preferences.default_temperature,
       max_tokens: preferences.default_max_tokens,
       system_prompt: preferences.default_system_prompt || undefined,
     });
+    
     setMessage('');
+    setAttachments([]); // Clear attachments on send
 
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [message, isStreaming, sendMessage, conversationId, preferences]);
+  }, [message, attachments, isStreaming, sendMessage, conversationId, preferences]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && preferences.send_on_enter) {
@@ -54,10 +74,42 @@ export default function InputBar({ conversationId }: InputBarProps) {
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
-    // Auto-resize
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const newAttachments = Array.from(files).map((f) => {
+      let type = 'document';
+      if (f.type.startsWith('image/')) type = 'image';
+      else if (f.type.startsWith('audio/')) type = 'audio';
+      
+      // Clean extension for rendering
+      const nameWithoutExt = f.name.substring(0, f.name.lastIndexOf('.')) || f.name;
+      return {
+        id: Math.random().toString(),
+        name: nameWithoutExt,
+        type,
+      };
+    });
+    setAttachments((prev) => [...prev, ...newAttachments]);
+    toast.success(`Attached ${files.length} file(s)`);
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const toggleListening = () => {
+    setIsListening(!isListening);
+    if (!isListening) {
+      toast.info('Voice typing activated. Start speaking...');
+    } else {
+      toast.success('Voice typing completed');
+    }
   };
 
   return (
@@ -67,187 +119,359 @@ export default function InputBar({ conversationId }: InputBarProps) {
       margin: '0 auto',
       width: '100%',
     }}>
-      <motion.div
-        animate={isFocused ? { 
-          boxShadow: '0 10px 30px rgba(79, 70, 229, 0.08), 0 2px 12px rgba(79, 70, 229, 0.03)',
-          borderColor: 'rgba(79, 70, 229, 0.4)' 
-        } : { 
-          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.03), 0 2px 8px rgba(0, 0, 0, 0.02)',
-          borderColor: 'rgba(0, 0, 0, 0.07)'
-        }}
-        transition={{ duration: 0.2 }}
+      <style>{`
+        @keyframes gradientMove {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+      `}</style>
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        multiple
+        style={{ display: 'none' }}
+      />
+      
+      {/* Animated Wrapper acting as flowing border */}
+      <div 
         style={{
-          background: 'var(--bg-card)',
-          border: '1px solid',
-          borderRadius: 'var(--radius-xl)',
-          overflow: 'hidden',
-          transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+          position: 'relative',
+          padding: '1.5px',
+          borderRadius: '20px',
+          background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-primary-glow), var(--accent-primary-hover), var(--accent-primary))',
+          backgroundSize: '200% 200%',
+          animation: 'gradientMove 8s linear infinite',
+          boxShadow: isFocused 
+            ? '0 8px 32px var(--accent-primary-glow), 0 2px 10px rgba(0, 0, 0, 0.05)'
+            : '0 4px 16px rgba(0, 0, 0, 0.03)',
+          transition: 'box-shadow var(--transition-medium)',
         }}
       >
-        {/* Textarea */}
-        <div style={{ padding: '14px 16px 4px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <span style={{
-              fontSize: 18,
-              lineHeight: '24px',
-              marginTop: 2,
-              opacity: 0.8,
-            }}>
-              ✨
-            </span>
-            <textarea
-              ref={textareaRef}
-              value={message}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              placeholder="Initiate a query or send a command to the AI..."
-              rows={1}
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                resize: 'none',
-                background: 'transparent',
-                color: 'var(--text-primary)',
-                fontSize: 14,
-                lineHeight: '1.6',
-                fontFamily: 'inherit',
-                minHeight: 24,
-                maxHeight: 200,
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Bottom action bar */}
+        {/* Glow backdrop (behind) */}
         <div style={{
-          padding: '6px 12px 10px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'transparent',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {/* Attach button (standalone icon) */}
-            <button
-              onClick={() => {}}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                color: 'var(--text-secondary)',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)',
-                boxShadow: 'var(--shadow-xs)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-1)';
-                e.currentTarget.style.color = 'var(--text-primary)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-card)';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-              }}
-              title="Attach File"
-            >
-              <Paperclip size={14} />
-            </button>
+          position: 'absolute',
+          inset: '-2px',
+          borderRadius: '22px',
+          background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-primary-glow), var(--accent-primary-hover), var(--accent-primary))',
+          backgroundSize: '200% 200%',
+          animation: 'gradientMove 8s linear infinite',
+          filter: 'blur(12px)',
+          opacity: isFocused ? 0.32 : 0.12,
+          pointerEvents: 'none',
+          transition: 'opacity var(--transition-medium)',
+          zIndex: -1,
+        }} />
 
-            {/* Chips (Reasoning, Create Image, Deep Research) */}
-            {[
-              { icon: <Sparkles size={14} color="#6366f1" />, label: 'Reasoning' },
-              { icon: <ImagePlus size={14} color="#ec4899" />, label: 'Create Image' },
-              { icon: <LineChart size={14} color="#f59e0b" />, label: 'Deep Research' },
-            ].map((action) => (
-              <button
-                key={action.label}
-                onClick={() => {}}
+        {/* Outer Chat Box Container */}
+        <div style={{
+          background: 'var(--bg-sidebar)',
+          borderRadius: '19px',
+          padding: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+          zIndex: 1,
+        }}>
+        {/* Top attachment area */}
+        {attachments.length > 0 && (
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            marginBottom: 10,
+            padding: '0 4px',
+          }}>
+            {attachments.map((att) => (
+              <div
+                key={att.id}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                   padding: '6px 12px',
-                  fontSize: 12.5,
-                  fontWeight: 500,
-                  color: 'var(--text-secondary)',
-                  background: 'var(--bg-card)',
+                  background: 'var(--bg-secondary)',
                   border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-md)',
-                  cursor: 'pointer',
-                  transition: 'all var(--transition-fast)',
-                  whiteSpace: 'nowrap',
+                  borderRadius: 'var(--radius-pill)',
                   boxShadow: 'var(--shadow-xs)',
+                }}
+              >
+                <span style={{ color: 'var(--text-secondary)', display: 'flex' }}>
+                  {att.type === 'image' && <Image size={13} />}
+                  {att.type === 'audio' && <FileAudio size={13} />}
+                  {att.type === 'document' && <FileText size={13} />}
+                  {att.type === 'folder' && <FolderOpen size={13} />}
+                </span>
+                <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {att.name}
+                </span>
+                <button
+                  onClick={() => removeAttachment(att.id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 2,
+                    borderRadius: '50%',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginLeft: 2,
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Inner Textarea Input Area Card */}
+        <div style={{
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '14px',
+          padding: '12px 14px 10px',
+          boxShadow: 'var(--shadow-xs)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}>
+          {/* Text Area */}
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            placeholder="What should be reviewed?"
+            rows={1}
+            style={{
+              width: '100%',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              background: 'transparent',
+              color: 'var(--text-primary)',
+              fontSize: 14,
+              lineHeight: '1.6',
+              fontFamily: 'inherit',
+              minHeight: 24,
+              maxHeight: 200,
+            }}
+          />
+          
+          {/* Action Bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}>
+            {/* Left buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {/* + Add button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 32, height: 32,
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  color: 'var(--text-secondary)',
+                  boxShadow: 'var(--shadow-xs)',
+                  transition: 'all var(--transition-fast)',
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = 'var(--surface-1)';
                   e.currentTarget.style.borderColor = 'var(--border-strong)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-default)';
+                }}
+                title="Add Attachment"
+              >
+                <Plus size={15} />
+              </button>
+
+              {/* Set Limit button */}
+              <button
+                onClick={() => {}}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', height: 32,
+                  fontSize: 12.5, fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-xs)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--surface-1)';
+                  e.currentTarget.style.borderColor = 'var(--border-strong)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-default)';
+                }}
+              >
+                <MinusCircle size={13} style={{ color: 'var(--text-muted)' }} />
+                <span>Set limit</span>
+              </button>
+
+              {/* Run Check button */}
+              <button
+                onClick={() => {}}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', height: 32,
+                  fontSize: 12.5, fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-xs)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--surface-1)';
+                  e.currentTarget.style.borderColor = 'var(--border-strong)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-default)';
+                }}
+              >
+                <Play size={13} style={{ color: 'var(--text-muted)' }} />
+                <span>Run check</span>
+              </button>
+
+              {/* Model Selector Pill */}
+              <button
+                onClick={() => {}}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', height: 32,
+                  fontSize: 12.5, fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-xs)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--surface-1)';
+                  e.currentTarget.style.borderColor = 'var(--border-strong)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--border-default)';
+                }}
+              >
+                <Bot size={13} style={{ color: 'var(--accent-primary)' }} />
+                <span>{preferences.default_model_id}</span>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ opacity: .5 }}>
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            
+            {/* Right buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* Voice button */}
+              <button
+                onClick={toggleListening}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 32, height: 32,
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  color: isListening ? 'var(--accent-primary)' : 'var(--text-muted)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--surface-1)';
                   e.currentTarget.style.color = 'var(--text-primary)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-card)';
-                  e.currentTarget.style.borderColor = 'var(--border-default)';
-                  e.currentTarget.style.color = 'var(--text-secondary)';
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = isListening ? 'var(--accent-primary)' : 'var(--text-muted)';
                 }}
+                title="Voice input"
               >
-                {action.icon}
-                <span>{action.label}</span>
+                <Mic size={16} className={isListening ? 'animate-pulse' : ''} />
               </button>
-            ))}
+
+              {/* Send Button */}
+              {isStreaming ? (
+                <button
+                  onClick={stopStream}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 34, height: 34,
+                    borderRadius: '50%',
+                    background: 'var(--accent-error)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'white',
+                    boxShadow: 'var(--shadow-sm)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                  title="Stop generating"
+                >
+                  <Square size={13} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!message.trim() && attachments.length === 0}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 34,
+                    height: 34,
+                    borderRadius: '50%',
+                    background: (message.trim() || attachments.length > 0) ? 'var(--accent-primary)' : 'var(--surface-3)',
+                    border: 'none',
+                    cursor: (message.trim() || attachments.length > 0) ? 'pointer' : 'default',
+                    color: (message.trim() || attachments.length > 0) ? 'white' : 'var(--text-muted)',
+                    boxShadow: (message.trim() || attachments.length > 0) ? 'var(--shadow-sm)' : 'none',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                  title="Send message"
+                  onMouseEnter={(e) => {
+                    if (message.trim() || attachments.length > 0) {
+                      e.currentTarget.style.opacity = '0.9';
+                      e.currentTarget.style.transform = 'translateY(-0.5px)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                    e.currentTarget.style.transform = 'none';
+                  }}
+                >
+                  <ArrowUp size={16} />
+                </button>
+              )}
+            </div>
           </div>
-
-          {/* Send / Stop button */}
-          {isStreaming ? (
-            <button
-              onClick={stopStream}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--accent-error)',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'white',
-                transition: 'all var(--transition-fast)',
-              }}
-              title="Stop generating"
-            >
-              <Square size={13} />
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!message.trim()}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                borderRadius: 'var(--radius-md)',
-                background: message.trim() ? '#111827' : 'var(--surface-3)',
-                border: 'none',
-                cursor: message.trim() ? 'pointer' : 'default',
-                color: message.trim() ? 'white' : 'var(--text-muted)',
-                transition: 'all var(--transition-fast)',
-              }}
-              title="Send message"
-            >
-              <Send size={13} style={{ transform: message.trim() ? 'rotate(-45deg) translate(1px, -1px)' : 'none', transition: 'transform 0.15s ease' }} />
-            </button>
-          )}
         </div>
-      </motion.div>
-
+      </div>
+      </div>
+      
       {/* Keyboard hint */}
       <div style={{
         textAlign: 'center',

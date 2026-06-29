@@ -143,6 +143,7 @@ export interface SSEErrorEvent {
 
 export interface UserPreferences {
   theme: 'dark' | 'light' | 'system';
+  color_theme: 'slate' | 'gray' | 'zinc' | 'neutral' | 'stone' | 'red' | 'orange' | 'amber' | 'yellow' | 'lime' | 'green' | 'emerald' | 'indigo' | 'anvix';
   sidebar_mode: 'expanded' | 'collapsed' | 'hidden';
   default_model_id: string;
   default_temperature: number;
@@ -155,6 +156,7 @@ export interface UserPreferences {
   context_strategy: 'all' | 'last_n' | 'auto';
   enable_rag: boolean;
   message_width: 'sm' | 'md' | 'lg';
+  chat_bg_pattern: 'none' | 'dots' | 'polygons' | 'stripes' | 'temple';
 }
 
 // ── Media ───────────────────────────────────────────────────────────────────

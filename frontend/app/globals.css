@@ -10,13 +10,17 @@
     --bg-app:      #f3f4f6;       /* outer app wrapper — very light gray */
     --bg-primary:  #f3f4f6;
     --bg-secondary: #ffffff;      /* main content panel — pure white */
-    --bg-sidebar:  #ffffff;       /* sidebar — pure white */
+    --bg-sidebar:  #f8fafc;       /* sidebar — premium soft gray */
     --bg-card:     #ffffff;
     --bg-card-hover: #f9fafb;
     --bg-active:   #f0f2ff;
     --bg-input:    #f9fafb;
     --bg-chat:     #ffffff;
     --bg-tertiary: #f3f4f6;
+
+    --bg-active-menu: #ffffff;
+    --shadow-active-menu: 0 4px 12px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
+    --border-active-menu: rgba(0, 0, 0, 0.05);
 
     /* ── Surfaces ───────────────────────────────────────── */
     --surface-1: #f9fafb;
@@ -108,6 +112,10 @@
     --bg-input:     #18181b;
     --bg-chat:      #0d0d10;
     --bg-tertiary:  #1a1a1f;
+
+    --bg-active-menu: #1e1e23;
+    --shadow-active-menu: 0 4px 16px rgba(0, 0, 0, 0.4);
+    --border-active-menu: rgba(255, 255, 255, 0.03);
 
     --surface-1: #18181b;
     --surface-2: #1e1e23;
@@ -318,9 +326,16 @@ body {
   transition: all var(--transition-fast);
   text-decoration: none;
   font-weight: 400;
+  border: 1px solid transparent;
 }
 .nav-item:hover { background: var(--surface-1); color: var(--text-primary); }
-.nav-item.active { background: var(--bg-active); color: var(--accent-primary); font-weight: 500; }
+.nav-item.active {
+  background: var(--bg-active-menu);
+  color: var(--text-primary);
+  border: 1px solid var(--border-active-menu);
+  box-shadow: var(--shadow-active-menu);
+  font-weight: 500;
+}
 
 /* Badge */
 .badge {

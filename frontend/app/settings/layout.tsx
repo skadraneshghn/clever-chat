@@ -85,7 +85,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             key={item.href}
             onClick={() => router.push(item.href)}
             className={`nav-item ${pathname === item.href ? 'active' : ''}`}
-            style={{ width: '100%', border: 'none', background: pathname === item.href ? 'var(--bg-active)' : 'transparent' }}
+            style={{ width: '100%' }}
           >
             {item.icon}
             {item.label}
