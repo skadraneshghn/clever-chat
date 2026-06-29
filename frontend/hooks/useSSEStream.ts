@@ -4,6 +4,7 @@ import { useCallback, useRef } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useChatStore } from '@/stores/chatStore';
 import type { ChatStreamRequest, Message } from '@/types';
+import { toast } from 'sonner';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -104,6 +105,7 @@ export function useSSEStream() {
 
               case 'error':
                 console.error('Stream error:', data);
+                toast.error(data.message || 'Stream error occurred');
                 setStreamingState(false);
                 break;
             }
@@ -111,6 +113,7 @@ export function useSSEStream() {
 
           onerror: (err) => {
             console.error('SSE error:', err);
+            toast.error(err instanceof Error ? err.message : 'SSE connection failed');
             setStreamingState(false);
             throw err; // Stops retry
           },
@@ -122,6 +125,7 @@ export function useSSEStream() {
       } catch (err: any) {
         if (err?.name !== 'AbortError') {
           console.error('Stream failed:', err);
+          toast.error(err?.message || 'Connection to streaming endpoint failed');
         }
         setStreamingState(false);
       }

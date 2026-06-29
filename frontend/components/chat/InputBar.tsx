@@ -22,11 +22,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [attachments, setAttachments] = useState<{ id: string; name: string; type: string }[]>([
-    { id: '1', name: 'agreement', type: 'document' },
-    { id: '2', name: 'evidence', type: 'image' },
-    { id: '3', name: 'case files', type: 'folder' },
-  ]);
+  const [attachments, setAttachments] = useState<{ id: string; name: string; type: string }[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);

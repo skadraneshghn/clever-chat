@@ -71,17 +71,10 @@ def _build_llm(
     max_tokens: int = 4096,
 ):
     """Build a LangChain chat model instance dynamically based on provider type."""
-
-    if provider_type == "ollama":
-        # Ollama uses ChatOpenAI with a local base URL and no API key
-        return ChatOpenAI(
-            model=model_id,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            base_url=f"{base_url}/v1",
-            api_key="ollama",  # Ollama doesn't require a key but LangChain needs a non-empty string
-            streaming=True,
-        )
+    # Ensure base_url ends with /v1 but not /v1/v1
+    clean_url = base_url.rstrip("/")
+    if not clean_url.endswith("/v1"):
+        clean_url = f"{clean_url}/v1"
 
     # Reasoning model special handling
     is_reasoning = capabilities.get("reasoning", False)
@@ -93,12 +86,23 @@ def _build_llm(
         # Reasoning models typically don't use temperature
         temperature = 1.0
 
+    if provider_type == "ollama":
+        # Ollama uses ChatOpenAI with a local base URL and no API key
+        return ChatOpenAI(
+            model=model_id,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            base_url=clean_url,
+            api_key="ollama",  # Ollama doesn't require a key but LangChain needs a non-empty string
+            streaming=True,
+        )
+
     if provider_type == "nvidia":
         return ChatOpenAI(
             model=model_id,
             temperature=temperature,
             max_tokens=max_tokens,
-            base_url=f"{base_url}/v1",
+            base_url=clean_url,
             api_key=api_key or "",
             streaming=True,
             **extra_kwargs,
@@ -114,11 +118,11 @@ def _build_llm(
     if api_key:
         init_kwargs["api_key"] = api_key
     if provider_type == "generic_openai_compatible":
-        init_kwargs["base_url"] = f"{base_url}/v1"
+        init_kwargs["base_url"] = clean_url
     elif provider_type == "openai":
-        # Standard OpenAI — use default base URL
-        if api_key:
-            init_kwargs["api_key"] = api_key
+        # Standard OpenAI — override base URL only if non-empty custom
+        if base_url:
+            init_kwargs["base_url"] = clean_url
 
     init_kwargs.update(extra_kwargs)
     return ChatOpenAI(**init_kwargs)

@@ -63,10 +63,14 @@ async def discover_openai_compatible(base_url: str, api_key: str | None = None) 
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    clean_url = base_url.rstrip("/")
+    if not clean_url.endswith("/v1"):
+        clean_url = f"{clean_url}/v1"
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        # Try /v1/models first, then /models
-        for path in ("/v1/models", "/models"):
-            url = f"{base_url.rstrip('/')}{path}"
+        # Try /v1/models (clean_url/models) first, then /models (parent_url/models)
+        urls = [f"{clean_url}/models", f"{clean_url.rsplit('/v1', 1)[0]}/models"]
+        for url in urls:
             try:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
@@ -76,7 +80,7 @@ async def discover_openai_compatible(base_url: str, api_key: str | None = None) 
         else:
             raise RuntimeError(
                 f"Could not reach model list at {base_url}. "
-                "Tried /v1/models and /models."
+                f"Tried: {', '.join(urls)}"
             )
 
         data = resp.json()
