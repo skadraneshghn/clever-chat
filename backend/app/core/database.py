@@ -29,6 +29,10 @@ _async_session_factory = None
 
 def _build_engine():
     settings = get_settings()
+    # Clever Cloud PostgreSQL requires SSL for external connections
+    connect_args = {}
+    if settings.DATABASE_URL and "localhost" not in settings.DATABASE_URL:
+        connect_args["ssl"] = "require"
     return create_async_engine(
         settings.DATABASE_URL,
         pool_size=settings.DB_POOL_MIN_SIZE,
@@ -37,6 +41,7 @@ def _build_engine():
         pool_recycle=300,
         pool_pre_ping=True,
         echo=settings.DEBUG,
+        connect_args=connect_args,
     )
 
 

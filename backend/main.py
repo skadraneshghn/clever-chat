@@ -58,13 +58,28 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("database_connected")
 
-    # 2. Create tables — auto-create on startup until Alembic migrations are set up
+    # 2. Create required PostgreSQL extensions + tables
     from app.core.database import Base, get_engine
-    # Import all models to ensure they're registered with SQLAlchemy metadata
+    # Import all models to register them with SQLAlchemy metadata
     from app.models import conversation, embeddings, media_asset, message, session, user, user_preferences  # noqa: F401
-    async with get_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("database_tables_created")
+    try:
+        async with get_engine().begin() as conn:
+            # Enable extensions first (required before creating vector columns)
+            await conn.execute(
+                __import__('sqlalchemy').text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+            )
+            await conn.execute(
+                __import__('sqlalchemy').text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
+            )
+            await conn.execute(
+                __import__('sqlalchemy').text('CREATE EXTENSION IF NOT EXISTS vector')
+            )
+            # Create all tables
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("database_tables_created")
+    except Exception as exc:
+        logger.error("database_setup_failed", error=str(exc))
+        raise  # Re-raise so worker fails fast with a clear error
 
     # 3. Process pool for CPU-bound work
     init_process_pool()

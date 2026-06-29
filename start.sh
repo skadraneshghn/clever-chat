@@ -5,7 +5,8 @@
 # Caddy listens on PORT (Clever Cloud), proxies to internal services
 # ═══════════════════════════════════════════════════════════════════════════
 
-set -e
+# No set -e — we manage errors manually to avoid killing the script on
+# background process failures
 
 CC_PORT="${PORT:-8080}"
 
@@ -26,8 +27,8 @@ PORT=8081 gunicorn -c gunicorn_config.py main:app &
 BACKEND_PID=$!
 echo "   ✓ Backend started (PID: $BACKEND_PID)"
 
-# Wait for internal services to be ready
-sleep 2
+# Give backend time to initialize (DB connection + table creation)
+sleep 4
 
 # ── Start Caddy (reverse proxy — main entry point) ─────────────────────
 cd /app
@@ -39,14 +40,35 @@ echo ""
 echo "✅ All services running!"
 echo "   App URL: http://0.0.0.0:${CC_PORT}"
 
-# ── Process Management ──────────────────────────────────────────────────
-# Trap signals and forward to children
-trap 'echo "Shutting down..."; kill $CADDY_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit 0' SIGTERM SIGINT
+# ── Signal Handling ──────────────────────────────────────────────────────
+cleanup() {
+    echo "🛑 Shutting down all services..."
+    kill "$CADDY_PID" "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null
+    wait "$CADDY_PID" "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null
+    echo "✅ All services stopped"
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
 
-# Wait for any process to exit — if one dies, stop all
-wait -n $CADDY_PID $BACKEND_PID $FRONTEND_PID
-EXIT_CODE=$?
-
-echo "⚠️  A service exited (code: $EXIT_CODE), shutting down..."
-kill $CADDY_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
-exit $EXIT_CODE
+# ── Keep alive — monitor all three processes ─────────────────────────────
+while true; do
+    # Check if backend is still running
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+        echo "💥 Backend died! Shutting down..."
+        kill "$CADDY_PID" "$FRONTEND_PID" 2>/dev/null
+        exit 1
+    fi
+    # Check if frontend is still running
+    if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+        echo "💥 Frontend died! Shutting down..."
+        kill "$CADDY_PID" "$BACKEND_PID" 2>/dev/null
+        exit 1
+    fi
+    # Check if caddy is still running
+    if ! kill -0 "$CADDY_PID" 2>/dev/null; then
+        echo "💥 Caddy died! Shutting down..."
+        kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null
+        exit 1
+    fi
+    sleep 5
+done
