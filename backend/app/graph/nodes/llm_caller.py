@@ -208,7 +208,49 @@ async def llm_caller(state: AgentState) -> dict:
         }
     except Exception as e:
         logger.error("llm_call_failed", error=str(e), model_id=model_id)
+        
+        error_msg = str(e)
+        is_not_found = False
+        lower_err = error_msg.lower()
+        if "not found" in lower_err or "not_found" in lower_err or "404" in lower_err or "unauthorized" in lower_err or "forbidden" in lower_err or "permission" in lower_err:
+            is_not_found = True
+            
+        if is_not_found:
+            try:
+                from app.core.database import get_db_context
+                from app.models.discovered_model import DiscoveredModel
+                from app.models.provider_connection import ProviderConnection
+                from sqlalchemy import update, select
+                import uuid as uuid_mod
+                
+                async with get_db_context() as session:
+                    if user_id:
+                        user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
+                        # Get connection IDs for this user
+                        subq = (
+                            select(ProviderConnection.id)
+                            .where(ProviderConnection.user_id == user_uuid)
+                        )
+                        stmt = (
+                            update(DiscoveredModel)
+                            .where(
+                                DiscoveredModel.model_id == model_id,
+                                DiscoveredModel.connection_id.in_(subq),
+                                DiscoveredModel.is_active == True
+                            )
+                            .values(is_active=False)
+                        )
+                        await session.execute(stmt)
+                        await session.commit()
+                        logger.info("model_auto_deactivated", model_id=model_id, user_id=str(user_id))
+            except Exception as db_exc:
+                logger.error("failed_to_auto_deactivate_model", error=str(db_exc))
+                
+            friendly_message = f"The selected model is not available or authorized for your provider account. We have automatically deactivated it from your list. Please select another model."
+        else:
+            friendly_message = error_msg
+
         return {
             "finish_reason": "error",
-            "error_message": str(e),
+            "error_message": friendly_message,
         }
