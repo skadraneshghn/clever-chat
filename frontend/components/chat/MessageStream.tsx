@@ -52,6 +52,9 @@ export default function MessageStream() {
         overflowY: 'auto',
         padding: '0 24px',
         position: 'relative',
+        background: isDark
+          ? 'linear-gradient(180deg, #090d16 0%, #0d121f 50%, #171d2c 100%)'
+          : 'linear-gradient(180deg, #ffffff 0%, #f8fafc 40%, #f1f5f9 100%)',
       }}
     >
       {/* ── Background Pattern Overlay ────────────────────── */}
@@ -101,6 +104,20 @@ export default function MessageStream() {
           </defs>
           <rect width="100%" height="100%" fill="url(#doodlePattern)" />
         </svg>
+      )}
+      {['pattern1', 'pattern2', 'pattern3', 'pattern4', 'pattern5'].includes(preferences.chat_bg_pattern) && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          zIndex: 0,
+          backgroundImage: `url(/patterns/${preferences.chat_bg_pattern}.png)`,
+          backgroundSize: ['pattern4', 'pattern5'].includes(preferences.chat_bg_pattern) ? '180px 180px' : '100px 100px',
+          backgroundRepeat: 'repeat',
+          filter: isDark ? 'invert(0.9) brightness(1.2)' : 'none',
+          mixBlendMode: isDark ? 'screen' : 'multiply',
+          opacity: isDark ? 0.08 : 0.22,
+        }} />
       )}
 
       {/* Message content relative wrapper */}

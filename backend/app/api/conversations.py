@@ -299,6 +299,24 @@ async def unshare_conversation(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/shared/{share_token}/metadata")
+async def get_shared_conversation_metadata(share_token: str, db: AsyncSession = Depends(get_db)):
+    """Get metadata for a shared conversation."""
+    result = await db.execute(
+        select(Conversation).where(Conversation.share_token == share_token)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Shared conversation not found")
+    
+    return {
+        "id": str(conv.id),
+        "title": conv.title,
+        "model_id": conv.model_id,
+        "created_at": conv.created_at,
+    }
+
+
 @router.get("/shared/{share_token}", response_model=list[MessageResponse])
 async def get_shared_conversation(share_token: str, db: AsyncSession = Depends(get_db)):
     """Get a shared conversation (public, no auth required)."""

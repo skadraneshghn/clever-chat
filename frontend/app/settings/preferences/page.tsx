@@ -132,6 +132,11 @@ export default function PreferencesPage() {
             { value: 'polygons', label: 'Polygons', preview: 'polygons' },
             { value: 'stripes', label: 'Slanted Lines', preview: 'stripes' },
             { value: 'temple', label: 'Telegram Doodle', preview: 'temple' },
+            { value: 'pattern1', label: 'Chevron Repeat', preview: 'pattern1' },
+            { value: 'pattern2', label: 'Triangular Mesh', preview: 'pattern2' },
+            { value: 'pattern3', label: 'Diagonal Grid', preview: 'pattern3' },
+            { value: 'pattern4', label: 'Golden Isometric', preview: 'pattern4' },
+            { value: 'pattern5', label: 'Golden Hexagonal', preview: 'pattern5' },
           ].map((pat) => {
             const isSelected = preferences.chat_bg_pattern === pat.value;
             return (
@@ -192,6 +197,15 @@ export default function PreferencesPage() {
                       <path d="M5 25 Q 10 22, 15 25" strokeWidth="0.5" />
                       <rect x="20" y="20" width="8" height="6" rx="1" strokeWidth="0.5" />
                     </svg>
+                  )}
+                  {['pattern1', 'pattern2', 'pattern3', 'pattern4', 'pattern5'].includes(pat.value) && (
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      backgroundImage: `url(/patterns/${pat.value}.png)`,
+                      backgroundSize: '40px 40px',
+                      backgroundRepeat: 'repeat',
+                      filter: theme === 'dark' ? 'invert(0.9) contrast(0.7) opacity(0.4)' : 'contrast(0.7) opacity(0.3)',
+                    }} />
                   )}
                   {pat.value === 'none' && (
                     <div style={{

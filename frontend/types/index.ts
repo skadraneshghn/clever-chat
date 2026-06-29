@@ -169,7 +169,7 @@ export interface UserPreferences {
   context_strategy: 'all' | 'last_n' | 'auto';
   enable_rag: boolean;
   message_width: 'sm' | 'md' | 'lg';
-  chat_bg_pattern: 'none' | 'dots' | 'polygons' | 'stripes' | 'temple';
+  chat_bg_pattern: 'none' | 'dots' | 'polygons' | 'stripes' | 'temple' | 'pattern1' | 'pattern2' | 'pattern3' | 'pattern4' | 'pattern5';
 }
 
 // ── Media ───────────────────────────────────────────────────────────────────
