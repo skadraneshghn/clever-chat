@@ -25,7 +25,7 @@ function getProviderIcon(providerType: ProviderType) {
 }
 
 export default function ChatHeader() {
-  const { preferences, updatePreferences } = usePreferencesStore();
+  const { preferences, updatePreferences, reasoningOnly } = usePreferencesStore();
   const { availableModels, fetchAvailableModels } = useProviderStore();
   const { resetChat } = useChatStore();
   const router = useRouter();
@@ -41,14 +41,18 @@ export default function ChatHeader() {
   const currentModelName = currentModel?.display_name || preferences.default_model_id || 'Select Model';
   const currentProviderType = currentModel?.provider_type || 'openai';
 
-  // Filter models by search
-  const filteredModels = searchQuery
-    ? availableModels.filter((m) =>
-        m.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.model_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.provider_name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : availableModels;
+  // Filter models by reasoning and search
+  let filteredModels = availableModels;
+  if (reasoningOnly) {
+    filteredModels = filteredModels.filter((m) => m.capabilities?.reasoning === true);
+  }
+  if (searchQuery) {
+    filteredModels = filteredModels.filter((m) =>
+      m.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.model_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.provider_name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }
 
   // Group by provider
   const grouped = filteredModels.reduce<Record<string, typeof filteredModels>>((acc, model) => {

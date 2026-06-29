@@ -5,11 +5,14 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useChatStore } from '@/stores/chatStore';
 import type { ChatStreamRequest, Message } from '@/types';
 import { toast } from 'sonner';
+import { useRouter, usePathname } from 'next/navigation';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 export function useSSEStream() {
   const abortRef = useRef<AbortController | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
   const {
     appendStreamToken,
     setStreamingState,
@@ -65,6 +68,9 @@ export function useSSEStream() {
                 messageId = data.message_id;
                 setConversationIdFromStream(data.conversation_id);
                 setStreamingMessageId(data.message_id);
+                if (pathname === '/') {
+                  router.push(`/${data.conversation_id}`);
+                }
                 break;
 
               case 'token':

@@ -7,10 +7,12 @@ import { api } from '@/lib/api';
 interface PreferencesState {
   preferences: UserPreferences;
   isLoaded: boolean;
+  reasoningOnly: boolean;
 
   fetchPreferences: () => Promise<void>;
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   setPreference: <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => void;
+  setReasoningOnly: (val: boolean) => void;
 }
 
 const defaultPreferences: UserPreferences = {
@@ -34,6 +36,7 @@ const defaultPreferences: UserPreferences = {
 export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   preferences: defaultPreferences,
   isLoaded: false,
+  reasoningOnly: false,
 
   fetchPreferences: async () => {
     try {
@@ -62,4 +65,6 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     }));
     // Debounced save handled by the component
   },
+
+  setReasoningOnly: (val) => set({ reasoningOnly: val }),
 }));

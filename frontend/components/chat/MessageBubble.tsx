@@ -98,9 +98,9 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
         </div>
 
         {/* Message body */}
-        <div className={`message-content ${isStreaming && isLast ? 'streaming-cursor' : ''}`}>
+        <div className={`message-content ${isStreaming && isLast ? 'streaming-cursor' : ''}`} dir="auto">
           {isUser ? (
-            <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{displayContent}</p>
+            <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{displayContent}</p>
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

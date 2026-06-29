@@ -7,11 +7,12 @@
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
-  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square
+  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square, Zap
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { usePreferencesStore } from '@/stores/preferencesStore';
+import { useProviderStore } from '@/stores/providerStore';
 import { toast } from 'sonner';
 
 interface InputBarProps {
@@ -29,7 +30,10 @@ export default function InputBar({ conversationId }: InputBarProps) {
   
   const { isStreaming } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
-  const { preferences } = usePreferencesStore();
+  const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
+  const { availableModels } = useProviderStore();
+
+  const currentModel = availableModels.find((m) => m.model_id === preferences.default_model_id);
 
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
@@ -244,6 +248,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder="What should be reviewed?"
+            dir="auto"
             rows={1}
             style={{
               width: '100%',
@@ -296,7 +301,50 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 <Plus size={15} />
               </button>
 
-
+              {/* Reasoning Toggle Pill */}
+              <button
+                onClick={() => {
+                  const newVal = !reasoningOnly;
+                  setReasoningOnly(newVal);
+                  if (newVal) {
+                    const isCurrentReasoning = currentModel?.capabilities?.reasoning === true;
+                    if (!isCurrentReasoning) {
+                      const firstReasoning = availableModels.find((m) => m.capabilities?.reasoning === true);
+                      if (firstReasoning) {
+                        updatePreferences({ default_model_id: firstReasoning.model_id });
+                        toast.info(`Switched to reasoning model: ${firstReasoning.display_name}`);
+                      }
+                    }
+                  }
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', height: 32,
+                  fontSize: 12.5, fontWeight: 500,
+                  color: reasoningOnly ? '#ea580c' : 'var(--text-secondary)',
+                  background: reasoningOnly ? 'var(--accent-warning-soft, #ffedd5)' : 'var(--bg-secondary)',
+                  border: reasoningOnly ? '1px solid #f97316' : '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-xs)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => {
+                  if (!reasoningOnly) {
+                    e.currentTarget.style.background = 'var(--surface-1)';
+                    e.currentTarget.style.borderColor = 'var(--border-strong)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!reasoningOnly) {
+                    e.currentTarget.style.background = 'var(--bg-secondary)';
+                    e.currentTarget.style.borderColor = 'var(--border-default)';
+                  }
+                }}
+              >
+                <Zap size={13} style={{ color: reasoningOnly ? '#ea580c' : 'var(--text-muted)' }} />
+                <span>Reasoning</span>
+              </button>
 
               {/* Model Selector Pill */}
               <button
@@ -323,7 +371,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 }}
               >
                 <Bot size={13} style={{ color: 'var(--accent-primary)' }} />
-                <span>{preferences.default_model_id}</span>
+                <span>{currentModel?.display_name || preferences.default_model_id}</span>
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ opacity: .5 }}>
                   <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
