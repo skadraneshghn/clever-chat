@@ -14,7 +14,7 @@ def _detect_capabilities(model_id: str) -> dict:
     """Single-pass string filter to auto-tag model capabilities."""
     mid = model_id.lower()
     return {
-        "vision": any(kw in mid for kw in ("vision", "vl", "llava", "4o", "gpt-4-turbo")),
+        "vision": any(kw in mid for kw in ("vision", "vl", "llava", "4o", "o4", "gpt-4-turbo")),
         "reasoning": any(kw in mid for kw in (
             "nemotron", "r1", "think", "reasoning", "o1", "o3", "o4",
             "deepseek-r", "qwq",
