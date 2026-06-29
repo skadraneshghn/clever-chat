@@ -10,7 +10,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, Settings, Trash2, Pin,
   LogOut, ChevronLeft, MessageSquare,
-  LayoutDashboard, FileText, Zap, Cpu, PenSquare, Bot, Sparkles
+  LayoutDashboard, FileText, Zap, Cpu, PenSquare, Bot, Sparkles,
+  MoreHorizontal, Share2, Users, Edit2, Archive
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -45,6 +46,7 @@ export default function Sidebar() {
   const { sidebarOpen, setSidebarOpen, isMobile, setMobileDrawerOpen } = useUIStore();
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
@@ -92,6 +94,11 @@ export default function Sidebar() {
             flexShrink: 0,
           }}
         >
+          <style>{`
+            .conv-item:hover .conv-more-btn {
+              opacity: 1 !important;
+            }
+          `}</style>
           {/* ── Logo ──────────────────────────────────────────── */}
           <div style={{
             padding: '18px 16px 10px',
@@ -226,7 +233,7 @@ export default function Sidebar() {
                       onClick={() => handleConvClick(conv.id)}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 9,
-                        padding: '7px 10px', fontSize: 13.5,
+                        padding: '7px 32px 7px 10px', fontSize: 13.5,
                         color: activeConversationId === conv.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                         background: activeConversationId === conv.id ? 'var(--bg-active-menu)' : 'transparent',
                         border: activeConversationId === conv.id ? '1px solid var(--border-active-menu)' : '1px solid transparent',
@@ -253,17 +260,152 @@ export default function Sidebar() {
                       {conv.is_pinned && <Pin size={11} style={{ color: 'var(--accent-warning)', flexShrink: 0 }} />}
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(conv.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuId(activeMenuId === conv.id ? null : conv.id);
+                      }}
                       style={{
                         position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
                         background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--text-muted)', opacity: 0, padding: 4,
-                        borderRadius: 'var(--radius-sm)', transition: 'all var(--transition-fast)',
+                        color: 'var(--text-secondary)', opacity: (activeConversationId === conv.id || activeMenuId === conv.id) ? 1 : 0, padding: 4,
+                        borderRadius: 'var(--radius-sm)', transition: 'opacity var(--transition-fast), background var(--transition-fast)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10,
                       }}
-                      className="conv-delete-btn"
+                      className="conv-more-btn"
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'var(--surface-2)';
+                        e.currentTarget.style.color = 'var(--text-primary)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = 'var(--text-secondary)';
+                      }}
                     >
-                      <Trash2 size={12} />
+                      <MoreHorizontal size={14} />
                     </button>
+                    {activeMenuId === conv.id && (
+                      <>
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(null);
+                          }}
+                          style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 90,
+                            cursor: 'default',
+                          }}
+                        />
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            position: 'absolute',
+                            top: 'calc(100% + 2px)',
+                            right: 8,
+                            width: 180,
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-default)',
+                            borderRadius: 'var(--radius-lg)',
+                            boxShadow: 'var(--shadow-lg)',
+                            padding: '6px',
+                            zIndex: 100,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2,
+                            animation: 'fade-in 0.15s ease-out',
+                          }}
+                        >
+                          <button
+                            disabled
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                            }}
+                          >
+                            <Share2 size={14} />
+                            <span>Share</span>
+                          </button>
+                          <button
+                            disabled
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                            }}
+                          >
+                            <Users size={14} />
+                            <span>Start a group chat</span>
+                          </button>
+                          <button
+                            disabled
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                            }}
+                          >
+                            <Edit2 size={14} />
+                            <span>Rename</span>
+                          </button>
+                          
+                          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
+                          
+                          <button
+                            disabled
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                            }}
+                          >
+                            <Pin size={14} />
+                            <span>Pin chat</span>
+                          </button>
+                          <button
+                            disabled
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                            }}
+                          >
+                            <Archive size={14} />
+                            <span>Archive</span>
+                          </button>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              await handleDelete(conv.id);
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--accent-error)',
+                              textAlign: 'left', cursor: 'pointer', width: '100%',
+                              borderRadius: 'var(--radius-md)',
+                              transition: 'all var(--transition-fast)',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'var(--accent-error-soft)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            <Trash2 size={14} style={{ color: 'var(--accent-error)' }} />
+                            <span style={{ fontWeight: 500 }}>Delete</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

@@ -212,4 +212,5 @@ async def llm_caller(state: AgentState) -> dict:
         logger.error("llm_call_failed", error=str(e), model_id=model_id)
         return {
             "finish_reason": "error",
+            "error_message": str(e),
         }

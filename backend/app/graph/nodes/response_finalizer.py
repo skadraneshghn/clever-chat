@@ -19,6 +19,7 @@ async def response_finalizer(state: AgentState) -> dict:
     """
     return {
         "finish_reason": state.get("finish_reason", "stop"),
+        "error_message": state.get("error_message", ""),
         "input_tokens": state.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0),
     }

@@ -7,7 +7,7 @@
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
-  Plus, MinusCircle, Play, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square
+  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
@@ -296,61 +296,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 <Plus size={15} />
               </button>
 
-              {/* Set Limit button */}
-              <button
-                onClick={() => {}}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '6px 12px', height: 32,
-                  fontSize: 12.5, fontWeight: 500,
-                  color: 'var(--text-secondary)',
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-pill)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-xs)',
-                  transition: 'all var(--transition-fast)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--surface-1)';
-                  e.currentTarget.style.borderColor = 'var(--border-strong)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-secondary)';
-                  e.currentTarget.style.borderColor = 'var(--border-default)';
-                }}
-              >
-                <MinusCircle size={13} style={{ color: 'var(--text-muted)' }} />
-                <span>Set limit</span>
-              </button>
 
-              {/* Run Check button */}
-              <button
-                onClick={() => {}}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '6px 12px', height: 32,
-                  fontSize: 12.5, fontWeight: 500,
-                  color: 'var(--text-secondary)',
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-pill)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-xs)',
-                  transition: 'all var(--transition-fast)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--surface-1)';
-                  e.currentTarget.style.borderColor = 'var(--border-strong)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-secondary)';
-                  e.currentTarget.style.borderColor = 'var(--border-default)';
-                }}
-              >
-                <Play size={13} style={{ color: 'var(--text-muted)' }} />
-                <span>Run check</span>
-              </button>
 
               {/* Model Selector Pill */}
               <button

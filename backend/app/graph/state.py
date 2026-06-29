@@ -41,3 +41,5 @@ class AgentState(TypedDict):
     input_tokens: int
     output_tokens: int
     finish_reason: str
+    error_message: str
+

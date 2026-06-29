@@ -117,6 +117,7 @@ async def chat_stream(
         "input_tokens": 0,
         "output_tokens": 0,
         "finish_reason": "",
+        "error_message": "",
     }
 
     # Commit the user message before streaming
@@ -168,6 +169,13 @@ async def chat_stream(
                         if isinstance(output, dict):
                             input_tokens = output.get("input_tokens", input_tokens)
                             output_tokens = output.get("output_tokens", output_tokens)
+                            if node_name == "llm_caller" and output.get("finish_reason") == "error":
+                                yield await _sse_event("error", {
+                                    "code": "llm_call_failed",
+                                    "message": output.get("error_message", "LLM call failed"),
+                                    "recoverable": False,
+                                })
+                                return
                         yield await _sse_event("node_end", {
                             "node": node_name,
                         })
