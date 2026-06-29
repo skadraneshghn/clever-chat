@@ -1,0 +1,9 @@
+{
+  "build": {
+    "install": "npm ci",
+    "build": "npm run build"
+  },
+  "deploy": {
+    "goal": "npm start"
+  }
+}

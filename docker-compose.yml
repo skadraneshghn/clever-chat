@@ -1,0 +1,43 @@
+# CleverChat Docker Compose
+# PostgreSQL with pgvector + optional pgAdmin
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: cleverchat-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cleverchat
+      POSTGRES_PASSWORD: cleverchat_dev
+      POSTGRES_DB: cleverchat
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cleverchat -d cleverchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    shm_size: 256mb
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cleverchat-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cleverchat.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - tools
+
+volumes:
+  pgdata:
+    driver: local
