@@ -26,6 +26,7 @@ class ApiClient {
         const refreshed = await this.tryRefresh();
         if (!refreshed) {
           localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
           window.location.href = '/login';
         }
       }
@@ -43,14 +44,14 @@ class ApiClient {
 
   private async tryRefresh(): Promise<boolean> {
     try {
-      const token = this.getToken();
-      if (!token) return false;
+      const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+      if (!refreshToken) return false;
       
       // Use a separate fetch to avoid infinite loops
       const res = await fetch(`${this.baseUrl}/auth/refresh`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${refreshToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -58,6 +59,9 @@ class ApiClient {
       if (res.ok) {
         const data = await res.json();
         localStorage.setItem('access_token', data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem('refresh_token', data.refresh_token);
+        }
         return true;
       }
       return false;

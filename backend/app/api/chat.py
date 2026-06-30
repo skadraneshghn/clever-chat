@@ -214,14 +214,19 @@ async def chat_stream(
                 )
                 save_db.add(ai_message)
 
-                # Auto-generate title from first message
+                # Auto-generate a meaningful title on the first exchange
+                generated_title: str | None = None
                 if len(history_messages) <= 1 and full_response:
-                    title = body.message[:80].strip()
-                    if len(body.message) > 80:
-                        title += "..."
                     conv = await save_db.get(Conversation, conversation.id)
                     if conv and conv.title == "New Chat":
-                        conv.title = title
+                        from app.services.title_generator import generate_title
+                        generated_title = await generate_title(
+                            user_message=body.message,
+                            ai_response=full_response,
+                            model_id=graph_input["model_id"],
+                            user_id=str(user.id),
+                        )
+                        conv.title = generated_title
 
             # Send completion event
             yield await _sse_event("message_meta", {
@@ -231,6 +236,12 @@ async def chat_stream(
                 "latency_ms": latency_ms,
                 "model_id": graph_input["model_id"],
             })
+            # Send title update if a new title was generated
+            if generated_title:
+                yield await _sse_event("title_update", {
+                    "conversation_id": str(conversation.id),
+                    "title": generated_title,
+                })
             yield await _sse_event("done", {"finish_reason": "stop"})
 
         except Exception as e:

@@ -13,6 +13,9 @@ export function useSSEStream() {
   const abortRef = useRef<AbortController | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  // Keep a ref so the stale-closure inside useCallback always reads the latest pathname
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const {
     appendStreamToken,
     setStreamingState,
@@ -23,6 +26,7 @@ export function useSSEStream() {
     setConversationIdFromStream,
     addOptimisticUserMessage,
     fetchConversations,
+    updateConversation,
   } = useChatStore();
 
   const sendMessage = useCallback(
@@ -68,7 +72,9 @@ export function useSSEStream() {
                 messageId = data.message_id;
                 setConversationIdFromStream(data.conversation_id);
                 setStreamingMessageId(data.message_id);
-                if (pathname === '/') {
+                // Redirect to the new conversation page whenever we're not already on it.
+                // Using pathnameRef.current avoids the stale-closure bug with pathname.
+                if (!pathnameRef.current.endsWith(data.conversation_id)) {
                   router.push(`/${data.conversation_id}`);
                 }
                 break;
@@ -106,6 +112,11 @@ export function useSSEStream() {
                 };
                 finalizeStreamMessage(finalMessage);
                 fetchConversations();
+                break;
+
+              case 'title_update':
+                // Update the conversation title in the sidebar immediately
+                updateConversation(data.conversation_id, { title: data.title });
                 break;
 
               case 'done':
@@ -149,6 +160,7 @@ export function useSSEStream() {
       setConversationIdFromStream,
       addOptimisticUserMessage,
       fetchConversations,
+      updateConversation,
     ]
   );
 

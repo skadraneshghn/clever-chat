@@ -87,6 +87,7 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
 
     return TokenResponse(
         access_token=access_token,
+        refresh_token=refresh_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
@@ -131,6 +132,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
 
     response = TokenResponse(
         access_token=access_token,
+        refresh_token=refresh_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
     return response
@@ -193,6 +195,7 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
 
     return TokenResponse(
         access_token=new_access,
+        refresh_token=new_refresh,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 

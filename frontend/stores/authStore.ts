@@ -30,6 +30,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const data = await api.post<TokenResponse>('/auth/login', credentials);
       localStorage.setItem('access_token', data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh_token);
+      }
       await get().fetchUser();
       set({ isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -44,6 +47,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const data = await api.post<TokenResponse>('/auth/register', credentials);
       localStorage.setItem('access_token', data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh_token);
+      }
       await get().fetchUser();
       set({ isAuthenticated: true, isLoading: false });
     } catch (err) {
@@ -60,6 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Proceed with local logout even if server call fails
     }
     localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     set({ user: null, isAuthenticated: false });
   },
 
@@ -70,6 +77,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       set({ user: null, isAuthenticated: false });
       localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
     }
   },
 
