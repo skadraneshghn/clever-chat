@@ -92,19 +92,28 @@ def decode_token(token: str) -> dict[str, Any]:
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+from fastapi import Query
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    token: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """FastAPI dependency: extract and validate user from JWT Bearer token."""
-    if credentials is None:
+    """FastAPI dependency: extract and validate user from JWT Bearer token or token query param."""
+    token_str = None
+    if credentials:
+        token_str = credentials.credentials
+    elif token:
+        token_str = token
+
+    if not token_str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = decode_token(credentials.credentials)
+    payload = decode_token(token_str)
 
     if payload.get("type") != "access":
         raise HTTPException(

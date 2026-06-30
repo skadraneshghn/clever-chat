@@ -286,7 +286,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
                   }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={att.thumbnailUrl || att.previewUrl}
+                      src={att.previewUrl || att.thumbnailUrl}
                       alt={att.file.name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />

@@ -60,11 +60,14 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     (b: ContentBlock) => b.type === 'image_url' || b.type === 'image'
   );
 
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const tokenSuffix = token ? `?token=${token}` : '';
+
   // For AI messages: build a GalleryImage list from image_url blocks
   const galleryImages: GalleryImage[] = !isUser
     ? imageBlocks.map((b: ContentBlock) => ({
-        url: b.asset_id ? `/api/v1/media/${b.asset_id}` : (b.url || b.image_url?.url || ''),
-        thumbnailUrl: b.asset_id ? `/api/v1/media/${b.asset_id}/thumbnail` : (b.url || b.image_url?.url || ''),
+        url: b.asset_id ? `/api/v1/media/${b.asset_id}${tokenSuffix}` : (b.url || b.image_url?.url || ''),
+        thumbnailUrl: b.asset_id ? `/api/v1/media/${b.asset_id}/thumbnail${tokenSuffix}` : (b.url || b.image_url?.url || ''),
         assetId: b.asset_id,
       }))
     : [];
@@ -173,10 +176,10 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
                 }}>
                   {imageBlocks.map((block, i) => {
                     const src = block.asset_id
-                      ? `/api/v1/media/${block.asset_id}/thumbnail`
+                      ? `/api/v1/media/${block.asset_id}/thumbnail${tokenSuffix}`
                       : (block.url || block.image_url?.url || '');
                     const fullSrc = block.asset_id
-                      ? `/api/v1/media/${block.asset_id}`
+                      ? `/api/v1/media/${block.asset_id}${tokenSuffix}`
                       : src;
                     return (
                       <motion.div
