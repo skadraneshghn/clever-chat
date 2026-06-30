@@ -5,7 +5,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 import { useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -20,6 +20,8 @@ import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { toast } from 'sonner';
 import type { Message, ContentBlock } from '@/types';
+import { ImageGallery, type GalleryImage } from './ImageGallery';
+import { ZoomIn } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -31,6 +33,7 @@ interface MessageBubbleProps {
 export default function MessageBubble({ message, isStreaming, streamingContent, isLast }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [hovering, setHovering] = useState(false);
+  const [galleryStartIndex, setGalleryStartIndex] = useState<number | null>(null);
   const isUser = message.role === 'user';
 
   const { conversations, toggleMessageVisibility } = useChatStore();
@@ -51,6 +54,22 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     .map((b: ContentBlock) => b.text || '')
     .join('');
   const displayContent = isStreaming ? (streamingContent || '') : textContent;
+
+  // Extract image blocks for rendering
+  const imageBlocks = message.content.filter(
+    (b: ContentBlock) => b.type === 'image_url' || b.type === 'image'
+  );
+
+  // For AI messages: build a GalleryImage list from image_url blocks
+  const galleryImages: GalleryImage[] = !isUser
+    ? imageBlocks.map((b: ContentBlock) => ({
+        url: b.asset_id ? `/api/v1/media/${b.asset_id}` : (b.url || b.image_url?.url || ''),
+        thumbnailUrl: b.asset_id ? `/api/v1/media/${b.asset_id}/thumbnail` : (b.url || b.image_url?.url || ''),
+        assetId: b.asset_id,
+      }))
+    : [];
+
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(displayContent);
@@ -143,75 +162,246 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
         {/* Message body */}
         <div className={`message-content ${isStreaming && isLast ? 'streaming-cursor' : ''}`} dir="auto">
           {isUser ? (
-            <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{displayContent}</p>
-          ) : (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({ className, children, ...props }) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const code = String(children).replace(/\n$/, '');
-                  if (match) {
+            <div>
+              {/* Attached images */}
+              {imageBlocks.length > 0 && (
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: displayContent ? 10 : 0,
+                }}>
+                  {imageBlocks.map((block, i) => {
+                    const src = block.asset_id
+                      ? `/api/v1/media/${block.asset_id}/thumbnail`
+                      : (block.url || block.image_url?.url || '');
+                    const fullSrc = block.asset_id
+                      ? `/api/v1/media/${block.asset_id}`
+                      : src;
                     return (
-                      <div style={{ position: 'relative', margin: '12px 0' }}>
-                        <div style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '6px 12px',
-                          background: 'var(--surface-2)',
-                          borderRadius: 'var(--radius-md) var(--radius-md) 0 0',
-                          borderBottom: '1px solid var(--border-subtle)',
-                          fontSize: 12,
-                          color: 'var(--text-muted)',
-                        }}>
-                          <span style={{ fontWeight: 500 }}>{match[1]}</span>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(code);
-                              setCopied(true);
-                              setTimeout(() => setCopied(false), 2000);
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: 'var(--text-muted)',
-                              fontSize: 12,
-                            }}
-                          >
-                            {copied ? <FiCheck size={13} /> : <FiCopy size={13} />}
-                            {copied ? 'Copied' : 'Copy'}
-                          </button>
-                        </div>
-                        <SyntaxHighlighter
-                          style={oneLight as any}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{
-                            margin: 0,
-                            borderRadius: '0 0 var(--radius-md) var(--radius-md)',
-                            fontSize: 13,
-                            padding: 16,
-                            background: 'var(--surface-1)',
-                          }}
-                        >
-                          {code}
-                        </SyntaxHighlighter>
-                      </div>
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        style={{
+                          width: 96, height: 96,
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                          cursor: 'zoom-in',
+                          border: '1px solid var(--border-subtle)',
+                          flexShrink: 0,
+                          position: 'relative',
+                        }}
+                        onClick={() => setLightboxUrl(fullSrc)}
+                        title="Click to expand"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt="Attached image"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      </motion.div>
                     );
-                  }
-                  return <code className={className} {...props}>{children}</code>;
-                },
-              }}
-            >
-              {displayContent}
-            </ReactMarkdown>
+                  })}
+                </div>
+              )}
+              {displayContent && (
+                <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{displayContent}</p>
+              )}
+            </div>
+          ) : (
+            <div>
+              {/* ── AI-generated image grid ─────────────────────────────── */}
+              {galleryImages.length > 0 && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: galleryImages.length === 1
+                    ? '1fr'
+                    : galleryImages.length === 2
+                      ? '1fr 1fr'
+                      : '1fr 1fr',
+                  gap: 8,
+                  marginBottom: displayContent ? 14 : 0,
+                  maxWidth: galleryImages.length === 1 ? 520 : '100%',
+                }}>
+                  {galleryImages.map((img, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: i * 0.06 }}
+                      style={{
+                        position: 'relative',
+                        borderRadius: 14,
+                        overflow: 'hidden',
+                        cursor: 'zoom-in',
+                        aspectRatio: '1',
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border-subtle)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+                      }}
+                      onClick={() => setGalleryStartIndex(i)}
+                      whileHover={{ scale: 1.015 }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.thumbnailUrl
+                          ? (img.thumbnailUrl.startsWith('http') ? img.thumbnailUrl : `${process.env.NEXT_PUBLIC_API_URL || ''}${img.thumbnailUrl}`)
+                          : (img.url.startsWith('http') ? img.url : `${process.env.NEXT_PUBLIC_API_URL || ''}${img.url}`)}
+                        alt={`Generated image ${i + 1}`}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          display: 'block',
+                        }}
+                      />
+                      {/* Hover overlay */}
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        background: 'rgba(0,0,0,0)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'background 0.2s',
+                      }}
+                        onMouseEnter={(e) => {
+                          const el = e.currentTarget as HTMLDivElement;
+                          el.style.background = 'rgba(0,0,0,0.28)';
+                          const icon = el.querySelector('svg') as SVGElement | null;
+                          if (icon) icon.style.opacity = '1';
+                        }}
+                        onMouseLeave={(e) => {
+                          const el = e.currentTarget as HTMLDivElement;
+                          el.style.background = 'rgba(0,0,0,0)';
+                          const icon = el.querySelector('svg') as SVGElement | null;
+                          if (icon) icon.style.opacity = '0';
+                        }}
+                      >
+                        <ZoomIn size={28} color="white" style={{ opacity: 0, transition: 'opacity 0.2s', filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }} />
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Markdown text ─────────────────────────────────────────── */}
+              {displayContent && (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const code = String(children).replace(/\n$/, '');
+                      if (match) {
+                        return (
+                          <div style={{ position: 'relative', margin: '12px 0' }}>
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '6px 12px',
+                              background: 'var(--surface-2)',
+                              borderRadius: 'var(--radius-md) var(--radius-md) 0 0',
+                              borderBottom: '1px solid var(--border-subtle)',
+                              fontSize: 12,
+                              color: 'var(--text-muted)',
+                            }}>
+                              <span style={{ fontWeight: 500 }}>{match[1]}</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(code);
+                                  setCopied(true);
+                                  setTimeout(() => setCopied(false), 2000);
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--text-muted)',
+                                  fontSize: 12,
+                                }}
+                              >
+                                {copied ? <FiCheck size={13} /> : <FiCopy size={13} />}
+                                {copied ? 'Copied' : 'Copy'}
+                              </button>
+                            </div>
+                            <SyntaxHighlighter
+                              style={oneLight as any}
+                              language={match[1]}
+                              PreTag="div"
+                              customStyle={{
+                                margin: 0,
+                                borderRadius: '0 0 var(--radius-md) var(--radius-md)',
+                                fontSize: 13,
+                                padding: 16,
+                                background: 'var(--surface-1)',
+                              }}
+                            >
+                              {code}
+                            </SyntaxHighlighter>
+                          </div>
+                        );
+                      }
+                      return <code className={className} {...props}>{children}</code>;
+                    },
+                  }}
+                >
+                  {displayContent}
+                </ReactMarkdown>
+              )}
+            </div>
           )}
         </div>
+
+        {/* Full-screen gallery for AI-generated images */}
+        {galleryImages.length > 0 && galleryStartIndex !== null && (
+          <ImageGallery
+            images={galleryImages}
+            initialIndex={galleryStartIndex}
+            onClose={() => setGalleryStartIndex(null)}
+          />
+        )}
+
+        {/* Image lightbox */}
+        <AnimatePresence>
+          {lightboxUrl && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setLightboxUrl(null)}
+              style={{
+                position: 'fixed', inset: 0,
+                background: 'rgba(0,0,0,0.85)',
+                zIndex: 9999,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'zoom-out',
+              }}
+            >
+              <motion.img
+                src={lightboxUrl}
+                alt="Full size"
+                initial={{ scale: 0.85 }}
+                animate={{ scale: 1 }}
+                style={{
+                  maxWidth: '90vw',
+                  maxHeight: '90vh',
+                  borderRadius: 12,
+                  boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+                  objectFit: 'contain',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Token info */}
         {!isUser && message.input_tokens && !isStreaming && (

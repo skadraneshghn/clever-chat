@@ -155,21 +155,25 @@ def _build_legacy_llm(model_id: str, temperature: float, max_tokens: int):
 
 async def llm_caller(state: AgentState) -> dict:
     """Call the LLM and return the response.
-    
-    Uses JIT provider resolution: looks up the model in the database first,
-    falls back to legacy env-based config if not found.
-    
-    Note: Streaming is handled at the graph level via astream_events.
-    This node invokes the LLM and returns the complete response.
+
+    Supports two modes:
+    1. Standard text/vision chat (streaming via astream_events at graph level)
+    2. Image generation (non-streaming, returns generated_image_assets)
     """
     model_id = state.get("model_id", "gpt-4o")
     temperature = state.get("temperature", 0.7)
     max_tokens = state.get("max_tokens", 4096)
     user_id = state.get("user_id", "")
+    image_generation_mode = state.get("image_generation_mode", False)
 
     # Try dynamic resolution first
     conn_info = await _resolve_connection(model_id, user_id)
 
+    # ── Image Generation Branch ──────────────────────────────────────────────
+    if image_generation_mode:
+        return await _image_generation_caller(state, conn_info, model_id, user_id)
+
+    # ── Standard Text / Vision Branch ───────────────────────────────────────
     if conn_info:
         llm = _build_llm(
             model_id=conn_info["model_id"],
@@ -208,13 +212,13 @@ async def llm_caller(state: AgentState) -> dict:
         }
     except Exception as e:
         logger.error("llm_call_failed", error=str(e), model_id=model_id)
-        
+
         error_msg = str(e)
         is_not_found = False
         lower_err = error_msg.lower()
         if "not found" in lower_err or "not_found" in lower_err or "404" in lower_err or "unauthorized" in lower_err or "forbidden" in lower_err or "permission" in lower_err:
             is_not_found = True
-            
+
         if is_not_found:
             try:
                 from app.core.database import get_db_context
@@ -222,7 +226,7 @@ async def llm_caller(state: AgentState) -> dict:
                 from app.models.provider_connection import ProviderConnection
                 from sqlalchemy import update, select
                 import uuid as uuid_mod
-                
+
                 async with get_db_context() as session:
                     if user_id:
                         user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
@@ -245,7 +249,7 @@ async def llm_caller(state: AgentState) -> dict:
                         logger.info("model_auto_deactivated", model_id=model_id, user_id=str(user_id))
             except Exception as db_exc:
                 logger.error("failed_to_auto_deactivate_model", error=str(db_exc))
-                
+
             friendly_message = f"The selected model is not available or authorized for your provider account. We have automatically deactivated it from your list. Please select another model."
         else:
             friendly_message = error_msg
@@ -254,3 +258,162 @@ async def llm_caller(state: AgentState) -> dict:
             "finish_reason": "error",
             "error_message": friendly_message,
         }
+
+
+# ── Image Generation Implementation ─────────────────────────────────────────
+
+
+async def _image_generation_caller(
+    state: AgentState,
+    conn_info: dict | None,
+    model_id: str,
+    user_id: str,
+) -> dict:
+    """Generate images using the OpenAI-compatible images API.
+
+    Downloads each image, saves to disk, creates MediaAsset DB records,
+    and returns structured asset metadata.
+    """
+    import base64
+    import uuid as uuid_mod
+    from pathlib import Path
+
+    from app.core.config import get_settings
+    from app.core.database import get_db_context
+    from app.models.media_asset import MediaAsset
+
+    settings = get_settings()
+    image_n = state.get("image_n", 1)
+    messages = state.get("messages", [])
+
+    # Extract text prompt from the last HumanMessage
+    last_msg = messages[-1] if messages else None
+    if last_msg is None:
+        return {"finish_reason": "error", "error_message": "No prompt provided for image generation."}
+
+    raw = last_msg.content
+    if isinstance(raw, str):
+        prompt = raw
+    elif isinstance(raw, list):
+        prompt = " ".join(
+            b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        prompt = str(raw)
+
+    if not prompt.strip():
+        return {"finish_reason": "error", "error_message": "Image generation requires a text prompt."}
+
+    # Resolve provider connection details
+    if conn_info:
+        base_url = conn_info["base_url"].rstrip("/")
+        api_key = conn_info["api_key"] or "sk-placeholder"
+        upstream_model = conn_info["model_id"]
+    else:
+        from app.core.config import get_settings as _gs
+        _s = _gs()
+        base_url = "https://api.openai.com"
+        api_key = _s.OPENAI_API_KEY or "sk-placeholder"
+        upstream_model = model_id
+
+    # Normalise base_url — images API uses /v1/images/generations
+    if not base_url.endswith("/v1"):
+        api_base = f"{base_url}/v1"
+    else:
+        api_base = base_url
+
+    logger.info(
+        "image_generation_start",
+        model=upstream_model,
+        n=image_n,
+        prompt_len=len(prompt),
+    )
+
+    try:
+        import openai as openai_lib
+        client = openai_lib.AsyncOpenAI(api_key=api_key, base_url=api_base)
+        response = await client.images.generate(
+            model=upstream_model,
+            prompt=prompt,
+            n=image_n,
+            response_format="b64_json",
+            size="1024x1024",
+        )
+    except Exception as exc:
+        logger.error("image_generation_api_failed", error=str(exc))
+        return {
+            "finish_reason": "error",
+            "error_message": f"Image generation failed: {exc}",
+        }
+
+    # Persist each image to disk and create MediaAsset records
+    try:
+        import uuid as uuid_mod
+        user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
+        asset_dir = settings.upload_path / str(user_uuid)
+        asset_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        logger.error("image_save_dir_error", error=str(exc))
+        return {"finish_reason": "error", "error_message": "Failed to prepare storage directory."}
+
+    generated_assets = []
+
+    async with get_db_context() as db:
+        for img_data in response.data:
+            try:
+                raw_bytes = base64.b64decode(img_data.b64_json)
+                asset_id = uuid_mod.uuid4()
+                filename = f"{asset_id}.png"
+                file_path = asset_dir / filename
+
+                file_path.write_bytes(raw_bytes)
+
+                # Generate thumbnail
+                try:
+                    from PIL import Image as PILImage
+                    thumb_path = asset_dir / f"{asset_id}_thumb.jpg"
+                    with PILImage.open(file_path) as pil_img:
+                        pil_img = pil_img.convert("RGB")
+                        pil_img.thumbnail((256, 256))
+                        pil_img.save(thumb_path, "JPEG", quality=82, optimize=True)
+                    has_thumb = True
+                except Exception as thumb_exc:
+                    logger.warning("image_thumb_failed", error=str(thumb_exc))
+                    has_thumb = False
+
+                # DB record
+                asset = MediaAsset(
+                    id=asset_id,
+                    user_id=user_uuid,
+                    file_key=f"uploads/{user_uuid}/{filename}",
+                    mime_type="image/png",
+                    original_filename=filename,
+                    size_bytes=len(raw_bytes),
+                    width=1024,
+                    height=1024,
+                )
+                db.add(asset)
+                await db.flush()
+
+                generated_assets.append({
+                    "asset_id": str(asset_id),
+                    "url": f"/api/v1/media/{asset_id}",
+                    "thumbnail_url": f"/api/v1/media/{asset_id}/thumbnail" if has_thumb else f"/api/v1/media/{asset_id}",
+                })
+                logger.info("image_saved", asset_id=str(asset_id))
+
+            except Exception as img_exc:
+                logger.error("image_save_failed", error=str(img_exc))
+
+    if not generated_assets:
+        return {
+            "finish_reason": "error",
+            "error_message": "Image generation succeeded but failed to save images.",
+        }
+
+    return {
+        "generated_image_assets": generated_assets,
+        "finish_reason": "image_generated",
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }

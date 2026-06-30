@@ -60,10 +60,11 @@ export interface ConversationListResponse {
 // ── Messages ────────────────────────────────────────────────────────────────
 
 export interface ContentBlock {
-  type: 'text' | 'image' | 'audio' | 'document';
+  type: 'text' | 'image' | 'image_url' | 'audio' | 'document';
   text?: string;
   asset_id?: string;
   url?: string;
+  image_url?: { url: string };   // LangChain-style vision block
   mime_type?: string;
   transcription?: string;
   filename?: string;
@@ -100,6 +101,8 @@ export interface ChatStreamRequest {
   parent_message_id?: string | null;
   media_asset_ids?: string[];
   hidden_from_owner?: boolean;
+  image_generation_mode?: boolean;
+  image_n?: 1 | 2 | 4;
 }
 
 export interface ShareUser {

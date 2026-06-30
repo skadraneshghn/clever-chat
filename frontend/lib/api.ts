@@ -141,6 +141,28 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
   }
+
+  /** Upload an image/file to the media endpoint. Returns asset metadata including urls. */
+  async uploadMedia(file: File): Promise<{
+    id: string;
+    filename: string;
+    mime_type: string;
+    size_bytes: number;
+    width: number | null;
+    height: number | null;
+    url: string;
+    thumbnail_url: string | null;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = this.getToken();
+    const response = await fetch(`${this.baseUrl}/media/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    return this.handleResponse(response);
+  }
 }
 
 export class ApiError extends Error {

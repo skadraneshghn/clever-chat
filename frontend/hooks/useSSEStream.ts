@@ -27,6 +27,10 @@ export function useSSEStream() {
     addOptimisticUserMessage,
     fetchConversations,
     updateConversation,
+    pendingAttachments,
+    clearAttachments,
+    imageGenerationMode,
+    imageCount,
   } = useChatStore();
 
   const sendMessage = useCallback(
@@ -36,8 +40,20 @@ export function useSSEStream() {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      // Add optimistic user message
-      addOptimisticUserMessage(request.message, request.conversation_id || 'new');
+      // Collect successfully uploaded attachments from the store
+      const doneAttachments = pendingAttachments.filter((a) => a.status === 'done');
+      const assetIds = doneAttachments.map((a) => a.assetId!).filter(Boolean);
+
+      // Patch request with asset IDs + image generation flags
+      const fullRequest: ChatStreamRequest = {
+        ...request,
+        media_asset_ids: assetIds.length > 0 ? assetIds : undefined,
+        image_generation_mode: imageGenerationMode || undefined,
+        image_n: imageGenerationMode ? imageCount : undefined,
+      };
+
+      // Add optimistic user message (with image thumbnails shown immediately)
+      addOptimisticUserMessage(request.message, request.conversation_id || 'new', doneAttachments);
       setStreamingState(true);
 
       const token = localStorage.getItem('access_token');
@@ -52,7 +68,7 @@ export function useSSEStream() {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify(request),
+          body: JSON.stringify(fullRequest),
           signal: ctrl.signal,
           openWhenHidden: true,
 
@@ -60,6 +76,8 @@ export function useSSEStream() {
             if (!response.ok) {
               throw new Error(`Stream failed: ${response.status}`);
             }
+            // Clear attachments as soon as the stream is accepted
+            clearAttachments();
           },
 
           onmessage: (ev) => {
@@ -92,14 +110,34 @@ export function useSSEStream() {
                 removeNodeEvent(data.node);
                 break;
 
-              case 'message_meta':
+              case 'message_meta': {
                 // Stream complete — finalize message
+                // If this was an image generation request, build image content blocks
+                const generatedImages: { asset_id: string; url: string; thumbnail_url: string }[] =
+                  data.generated_images || [];
+
+                let finalContent: Message['content'];
+                if (generatedImages.length > 0) {
+                  const intro = `Generated ${generatedImages.length} image${generatedImages.length > 1 ? 's' : ''} based on your prompt.`;
+                  finalContent = [
+                    { type: 'text', text: intro },
+                    ...generatedImages.map((img) => ({
+                      type: 'image_url' as const,
+                      image_url: { url: img.url },
+                      asset_id: img.asset_id,
+                      url: img.thumbnail_url,
+                    })),
+                  ];
+                } else {
+                  finalContent = [{ type: 'text', text: fullContent }];
+                }
+
                 const finalMessage: Message = {
                   id: data.message_id || messageId,
                   conversation_id: conversationId || '',
                   parent_message_id: null,
                   role: 'assistant',
-                  content: [{ type: 'text', text: fullContent }],
+                  content: finalContent,
                   model_id: data.model_id || null,
                   input_tokens: data.input_tokens || null,
                   output_tokens: data.output_tokens || null,
@@ -113,6 +151,7 @@ export function useSSEStream() {
                 finalizeStreamMessage(finalMessage);
                 fetchConversations();
                 break;
+              }
 
               case 'title_update':
                 // Update the conversation title in the sidebar immediately
@@ -161,6 +200,10 @@ export function useSSEStream() {
       addOptimisticUserMessage,
       fetchConversations,
       updateConversation,
+      pendingAttachments,
+      clearAttachments,
+      imageGenerationMode,
+      imageCount,
     ]
   );
 

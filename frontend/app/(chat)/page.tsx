@@ -5,12 +5,13 @@
    Large greeting, centered input with action chips, 4-column suggestion cards
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   PenSquare, Sparkles, FileText, Code2, Bot
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useChatStore } from '@/stores/chatStore';
 import InputBar from '@/components/chat/InputBar';
 import { staggerContainer, fadeInUp } from '@/lib/motion';
 
@@ -51,6 +52,15 @@ const SUGGESTION_CARDS = [
 
 export default function HomePage() {
   const { user } = useAuthStore();
+  const { resetChat } = useChatStore();
+
+  // Always start clean when landing on the new-chat home page.
+  // This prevents ConversationPage's useEffect from restoring the previous conversation
+  // by setting isNewChatMode=true via resetChat().
+  useEffect(() => {
+    resetChat();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run only once on mount
 
   function getGreeting() {
     const h = new Date().getHours();
@@ -128,7 +138,7 @@ export default function HomePage() {
           transition={{ delay: 0.26, duration: 0.4 }}
           style={{ width: '100%', maxWidth: 'var(--max-content-width)' }}
         >
-          <InputBar />
+          <InputBar conversationId={null} />
         </motion.div>
 
         {/* ── Suggestion cards ────────────────────────────── */}

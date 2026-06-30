@@ -128,6 +128,9 @@ class ChatStreamRequest(BaseModel):
     parent_message_id: uuid.UUID | None = None
     media_asset_ids: list[uuid.UUID] = []
     hidden_from_owner: bool = False
+    # Image generation
+    image_generation_mode: bool = False
+    image_n: int = Field(default=1, ge=1, le=4)  # number of images to generate
 
 
 class PrivateShareRequest(BaseModel):

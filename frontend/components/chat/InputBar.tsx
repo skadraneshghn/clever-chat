@@ -7,12 +7,14 @@
 
 import { useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
-  Plus, Bot, Mic, ArrowUp, FileText, Image, FileAudio, FolderOpen, X, Square, Zap, Eye, EyeOff
+  Paperclip, Mic, ArrowUp, X, Square, Zap, Eye, EyeOff, Sparkles,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useProviderStore } from '@/stores/providerStore';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface InputBarProps {
@@ -23,12 +25,14 @@ export default function InputBar({ conversationId }: InputBarProps) {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [attachments, setAttachments] = useState<{ id: string; name: string; type: string }[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const { isStreaming, conversations } = useChatStore();
+
+  const { isStreaming, conversations, pendingAttachments, addAttachment, updateAttachment, removeAttachment,
+    imageGenerationMode, imageCount, toggleImageGenerationMode, setImageCount,
+  } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
   const { availableModels } = useProviderStore();
@@ -41,35 +45,32 @@ export default function InputBar({ conversationId }: InputBarProps) {
 
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
-    if (!trimmed && attachments.length === 0) return;
+    const hasReadyAttachments = pendingAttachments.some((a) => a.status === 'done');
+    if (!trimmed && !hasReadyAttachments) return;
     if (isStreaming) return;
-
-    // Build message text including attachments info if any
-    let finalMessage = trimmed;
-    if (attachments.length > 0) {
-      const attachInfo = attachments.map(a => `[Attached: ${a.name} (${a.type})]`).join(' ');
-      finalMessage = `${attachInfo}\n${trimmed}`;
+    // Block send if any attachment is still uploading
+    if (pendingAttachments.some((a) => a.status === 'uploading')) {
+      toast.warning('Please wait for uploads to finish.');
+      return;
     }
 
     sendMessage({
       conversation_id: conversationId || undefined,
-      message: finalMessage,
+      message: trimmed,
       model_id: preferences.default_model_id,
       temperature: preferences.default_temperature,
       max_tokens: preferences.default_max_tokens,
       system_prompt: preferences.default_system_prompt || undefined,
       hidden_from_owner: hiddenFromOwner,
     });
-    
-    setMessage('');
-    setAttachments([]); // Clear attachments on send
-    setHiddenFromOwner(false); // Reset toggle after send
 
-    // Reset textarea height
+    setMessage('');
+    setHiddenFromOwner(false);
+
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [message, attachments, isStreaming, sendMessage, conversationId, preferences]);
+  }, [message, pendingAttachments, isStreaming, sendMessage, conversationId, preferences, hiddenFromOwner]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && preferences.send_on_enter) {
@@ -85,28 +86,59 @@ export default function InputBar({ conversationId }: InputBarProps) {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   };
 
+  /** Upload a single image file to the server, updating the attachment store. */
+  const uploadFile = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error(`Only images are supported. Skipping "${file.name}".`);
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error(`"${file.name}" exceeds the 20 MB limit.`);
+      return;
+    }
+
+    const clientId = `${Date.now()}-${Math.random()}`;
+    const previewUrl = URL.createObjectURL(file);
+    addAttachment({ clientId, file, status: 'uploading', previewUrl });
+
+    try {
+      const result = await api.uploadMedia(file);
+      updateAttachment(clientId, {
+        status: 'done',
+        assetId: result.id,
+        thumbnailUrl: result.thumbnail_url
+          ? `${process.env.NEXT_PUBLIC_API_URL || ''}${result.thumbnail_url}`
+          : undefined,
+        url: `${process.env.NEXT_PUBLIC_API_URL || ''}${result.url}`,
+      });
+    } catch (err) {
+      updateAttachment(clientId, { status: 'error' });
+      toast.error(`Upload failed for "${file.name}"`);
+    }
+  }, [addAttachment, updateAttachment]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    const newAttachments = Array.from(files).map((f) => {
-      let type = 'document';
-      if (f.type.startsWith('image/')) type = 'image';
-      else if (f.type.startsWith('audio/')) type = 'audio';
-      
-      // Clean extension for rendering
-      const nameWithoutExt = f.name.substring(0, f.name.lastIndexOf('.')) || f.name;
-      return {
-        id: Math.random().toString(),
-        name: nameWithoutExt,
-        type,
-      };
-    });
-    setAttachments((prev) => [...prev, ...newAttachments]);
-    toast.success(`Attached ${files.length} file(s)`);
+    Array.from(files).forEach(uploadFile);
+    // Reset input so same file can be picked again
+    e.target.value = '';
   };
 
-  const removeAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(uploadFile);
   };
 
   const toggleListening = () => {
@@ -136,20 +168,26 @@ export default function InputBar({ conversationId }: InputBarProps) {
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
+        accept="image/*"
         multiple
         style={{ display: 'none' }}
       />
       
       {/* Animated Wrapper acting as flowing border */}
-      <div 
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         style={{
           position: 'relative',
           padding: '1.5px',
           borderRadius: '20px',
-          background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-primary-glow), var(--accent-primary-hover), var(--accent-primary))',
+          background: isDragOver
+            ? 'linear-gradient(135deg, #4f46e5, #7c3aed, #4f46e5)'
+            : 'linear-gradient(135deg, var(--accent-primary), var(--accent-primary-glow), var(--accent-primary-hover), var(--accent-primary))',
           backgroundSize: '200% 200%',
           animation: 'gradientMove 8s linear infinite',
-          boxShadow: isFocused 
+          boxShadow: isFocused
             ? '0 8px 32px var(--accent-primary-glow), 0 2px 10px rgba(0, 0, 0, 0.05)'
             : '0 4px 16px rgba(0, 0, 0, 0.03)',
           transition: 'box-shadow var(--transition-medium)',
@@ -180,60 +218,148 @@ export default function InputBar({ conversationId }: InputBarProps) {
           position: 'relative',
           zIndex: 1,
         }}>
-        {/* Top attachment area */}
-        {attachments.length > 0 && (
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 8,
-            marginBottom: 10,
-            padding: '0 4px',
-          }}>
-            {attachments.map((att) => (
-              <div
-                key={att.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '6px 12px',
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-pill)',
-                  boxShadow: 'var(--shadow-xs)',
-                }}
-              >
-                <span style={{ color: 'var(--text-secondary)', display: 'flex' }}>
-                  {att.type === 'image' && <Image size={13} />}
-                  {att.type === 'audio' && <FileAudio size={13} />}
-                  {att.type === 'document' && <FileText size={13} />}
-                  {att.type === 'folder' && <FolderOpen size={13} />}
-                </span>
-                <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-primary)' }}>
-                  {att.name}
-                </span>
-                <button
-                  onClick={() => removeAttachment(att.id)}
+        {/* Drag-and-drop overlay */}
+        <AnimatePresence>
+          {isDragOver && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={{
+                position: 'absolute', inset: 0,
+                borderRadius: '19px',
+                border: '2px dashed #6366f1',
+                background: 'rgba(99,102,241,0.07)',
+                backdropFilter: 'blur(2px)',
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'column',
+                gap: 8,
+                pointerEvents: 'none',
+              }}
+            >
+              <Paperclip size={28} style={{ color: '#6366f1', opacity: 0.8 }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#6366f1' }}>Drop images here</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Image attachment preview strip */}
+        <AnimatePresence>
+          {pendingAttachments.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                padding: '6px 4px 0',
+                overflow: 'hidden',
+              }}
+            >
+              {pendingAttachments.map((att) => (
+                <motion.div
+                  key={att.clientId}
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: 2,
-                    borderRadius: '50%',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginLeft: 2,
+                    position: 'relative',
+                    width: 72, height: 72,
+                    borderRadius: 10,
+                    overflow: 'visible',
+                    flexShrink: 0,
                   }}
                 >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        
+                  {/* Image thumbnail */}
+                  <div style={{
+                    width: '100%', height: '100%',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    border: att.status === 'error'
+                      ? '2px solid #ef4444'
+                      : '1px solid var(--border-subtle)',
+                  }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={att.thumbnailUrl || att.previewUrl}
+                      alt={att.file.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+
+                  {/* Upload overlay */}
+                  {att.status === 'uploading' && (
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      borderRadius: 10,
+                      background: 'rgba(0,0,0,0.45)',
+                      backdropFilter: 'blur(1px)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                      <div style={{
+                        width: 20, height: 20,
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: 'white',
+                        borderRadius: '50%',
+                        animation: 'spin 0.7s linear infinite',
+                      }} />
+                    </div>
+                  )}
+
+                  {/* Error overlay */}
+                  {att.status === 'error' && (
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      borderRadius: 10,
+                      background: 'rgba(127,0,0,0.55)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 11,
+                      color: 'white',
+                      fontWeight: 600,
+                    }}>Failed</div>
+                  )}
+
+                  {/* Remove button */}
+                  <button
+                    onClick={() => removeAttachment(att.clientId)}
+                    style={{
+                      position: 'absolute',
+                      top: -6, right: -6,
+                      width: 18, height: 18,
+                      borderRadius: '50%',
+                      background: '#111',
+                      border: '1.5px solid rgba(255,255,255,0.2)',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      zIndex: 2,
+                      padding: 0,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ef4444'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = '#111'; }}
+                    title="Remove"
+                  >
+                    <X size={10} />
+                  </button>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Inner Textarea Input Area Card */}
         <div style={{
           background: 'var(--bg-secondary)',
@@ -253,7 +379,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
             onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            placeholder="What should be reviewed?"
+            placeholder={imageGenerationMode ? "Describe the image you want to generate..." : "What should be reviewed?"}
             dir="auto"
             rows={1}
             style={{
@@ -280,17 +406,17 @@ export default function InputBar({ conversationId }: InputBarProps) {
           }}>
             {/* Left buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {/* + Add button */}
+              {/* Image attach button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 32, height: 32,
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-default)',
+                  background: pendingAttachments.length > 0 ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)',
+                  border: `1px solid ${pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--border-default)'}`,
                   borderRadius: 'var(--radius-pill)',
                   cursor: 'pointer',
-                  color: 'var(--text-secondary)',
+                  color: pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--text-secondary)',
                   boxShadow: 'var(--shadow-xs)',
                   transition: 'all var(--transition-fast)',
                 }}
@@ -299,13 +425,81 @@ export default function InputBar({ conversationId }: InputBarProps) {
                   e.currentTarget.style.borderColor = 'var(--border-strong)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-secondary)';
-                  e.currentTarget.style.borderColor = 'var(--border-default)';
+                  e.currentTarget.style.background = pendingAttachments.length > 0 ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--border-default)';
                 }}
-                title="Add Attachment"
+                title="Attach images"
               >
-                <Plus size={15} />
+                <Paperclip size={14} />
               </button>
+
+              {/* Image generation sparkle toggle */}
+              <button
+                onClick={toggleImageGenerationMode}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 10px', height: 32,
+                  fontSize: 12.5, fontWeight: 600,
+                  color: imageGenerationMode ? '#8b5cf6' : 'var(--text-secondary)',
+                  background: imageGenerationMode
+                    ? 'rgba(139,92,246,0.12)'
+                    : 'var(--bg-secondary)',
+                  border: imageGenerationMode ? '1px solid #8b5cf6' : '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-pill)',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)',
+                  boxShadow: imageGenerationMode ? '0 0 10px rgba(139,92,246,0.25)' : 'var(--shadow-xs)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = imageGenerationMode
+                    ? 'rgba(139,92,246,0.2)'
+                    : 'var(--surface-1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = imageGenerationMode
+                    ? 'rgba(139,92,246,0.12)'
+                    : 'var(--bg-secondary)';
+                }}
+                title={imageGenerationMode ? 'Disable image generation' : 'Enable image generation'}
+              >
+                <Sparkles size={13} />
+                <span>Image</span>
+              </button>
+
+              {/* Image count selector — visible when image gen is active */}
+              <AnimatePresence>
+                {imageGenerationMode && (
+                  <motion.div
+                    initial={{ opacity: 0, width: 0 }}
+                    animate={{ opacity: 1, width: 'auto' }}
+                    exit={{ opacity: 0, width: 0 }}
+                    style={{
+                      display: 'flex', gap: 4, overflow: 'hidden',
+                    }}
+                  >
+                    {([1, 2, 4] as const).map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setImageCount(n)}
+                        style={{
+                          width: 28, height: 28,
+                          borderRadius: 'var(--radius-sm)',
+                          border: imageCount === n ? '1px solid #8b5cf6' : '1px solid var(--border-default)',
+                          background: imageCount === n ? 'rgba(139,92,246,0.15)' : 'var(--bg-secondary)',
+                          color: imageCount === n ? '#8b5cf6' : 'var(--text-muted)',
+                          fontSize: 12, fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.15s',
+                        }}
+                        title={`Generate ${n} image${n > 1 ? 's' : ''}`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Reasoning Toggle Pill */}
               <button
@@ -409,7 +603,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
                   e.currentTarget.style.borderColor = 'var(--border-default)';
                 }}
               >
-                <Bot size={13} style={{ color: 'var(--accent-primary)' }} />
+                <Zap size={13} style={{ color: 'var(--accent-primary)' }} />
                 <span>{currentModel?.display_name || preferences.default_model_id}</span>
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ opacity: .5 }}>
                   <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -467,22 +661,22 @@ export default function InputBar({ conversationId }: InputBarProps) {
               ) : (
                 <button
                   onClick={handleSend}
-                  disabled={!message.trim() && attachments.length === 0}
+                  disabled={!message.trim() && pendingAttachments.filter(a => a.status === 'done').length === 0}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     width: 34,
                     height: 34,
                     borderRadius: '50%',
-                    background: (message.trim() || attachments.length > 0) ? 'var(--accent-primary)' : 'var(--surface-3)',
+                    background: (message.trim() || pendingAttachments.some(a => a.status === 'done')) ? 'var(--accent-primary)' : 'var(--surface-3)',
                     border: 'none',
-                    cursor: (message.trim() || attachments.length > 0) ? 'pointer' : 'default',
-                    color: (message.trim() || attachments.length > 0) ? 'white' : 'var(--text-muted)',
-                    boxShadow: (message.trim() || attachments.length > 0) ? 'var(--shadow-sm)' : 'none',
+                    cursor: (message.trim() || pendingAttachments.some(a => a.status === 'done')) ? 'pointer' : 'default',
+                    color: (message.trim() || pendingAttachments.some(a => a.status === 'done')) ? 'white' : 'var(--text-muted)',
+                    boxShadow: (message.trim() || pendingAttachments.some(a => a.status === 'done')) ? 'var(--shadow-sm)' : 'none',
                     transition: 'all var(--transition-fast)',
                   }}
                   title="Send message"
                   onMouseEnter={(e) => {
-                    if (message.trim() || attachments.length > 0) {
+                    if (message.trim() || pendingAttachments.some(a => a.status === 'done')) {
                       e.currentTarget.style.opacity = '0.9';
                       e.currentTarget.style.transform = 'translateY(-0.5px)';
                     }

@@ -13,7 +13,7 @@ import { useTheme } from 'next-themes';
 import MessageBubble from './MessageBubble';
 
 export default function MessageStream() {
-  const { messages, isStreaming, streamingContent } = useChatStore();
+  const { messages, isStreaming, streamingContent, activeNodes, imageGenerationMode } = useChatStore();
   const { preferences } = usePreferencesStore();
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -157,8 +157,75 @@ export default function MessageStream() {
             />
           )}
 
-          {/* Loading indicator when streaming starts but no content yet */}
-          {isStreaming && !streamingContent && (
+          {/* Image generation shimmer */}
+          {isStreaming && !streamingContent && (imageGenerationMode || activeNodes.includes('image_generator')) && (
+            <motion.div
+              key="image-gen-shimmer"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                display: 'flex', gap: 12, padding: '16px 0',
+                maxWidth: 'var(--max-content-width)', margin: '0 auto',
+                alignItems: 'flex-start',
+              }}
+            >
+              <div style={{
+                width: 32, height: 32, borderRadius: 'var(--radius-pill)',
+                background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 15, flexShrink: 0,
+              }}>✦</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 12 }}>
+                  CleverChat
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxWidth: 480 }}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <motion.div
+                      key={i}
+                      animate={{ opacity: [0.4, 0.8, 0.4] }}
+                      transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
+                      style={{
+                        borderRadius: 14, aspectRatio: '1',
+                        background: isDark
+                          ? 'linear-gradient(135deg, #1e1b4b, #312e81)'
+                          : 'linear-gradient(135deg, #ede9fe, #ddd6fe)',
+                        position: 'relative', overflow: 'hidden',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <motion.div
+                        animate={{ x: ['-100%', '200%'] }}
+                        transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+                        style={{
+                          position: 'absolute', inset: 0,
+                          background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.18), transparent)',
+                          transform: 'skewX(-10deg)',
+                        }}
+                      />
+                      {i === 0 && (
+                        <motion.span
+                          animate={{ opacity: [0.5, 1, 0.5], scale: [0.95, 1.05, 0.95] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                          style={{ fontSize: 24, zIndex: 1 }}
+                        >✦</motion.span>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+                <motion.p
+                  animate={{ opacity: [0.5, 1, 0.5] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                  style={{ marginTop: 12, fontSize: 13, color: '#8b5cf6', fontWeight: 500, fontStyle: 'italic' }}
+                >
+                  ✦ Painting your vision...
+                </motion.p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Loading: standard text dot indicator */}
+          {isStreaming && !streamingContent && !imageGenerationMode && !activeNodes.includes('image_generator') && (
             <motion.div
               key="loading"
               initial={{ opacity: 0, y: 8 }}

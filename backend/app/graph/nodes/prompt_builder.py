@@ -105,7 +105,18 @@ async def prompt_builder(state: AgentState) -> dict:
     user_prompt = ""
     for msg in reversed(messages):
         if getattr(msg, "type", "") == "human" or msg.__class__.__name__ == "HumanMessage":
-            user_prompt = msg.content if isinstance(msg.content, str) else str(msg.content)
+            raw = msg.content
+            if isinstance(raw, str):
+                user_prompt = raw
+            elif isinstance(raw, list):
+                # Multimodal content: extract text blocks only
+                user_prompt = " ".join(
+                    block.get("text", "")
+                    for block in raw
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            else:
+                user_prompt = str(raw)
             break
 
     detected_lang = detect_prompt_language(user_prompt)

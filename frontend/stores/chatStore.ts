@@ -4,6 +4,16 @@ import { create } from 'zustand';
 import type { Conversation, Message, ContentBlock, ShareUser } from '@/types';
 import { api } from '@/lib/api';
 
+export interface PendingAttachment {
+  clientId: string;               // browser-local unique ID
+  file: File;                     // raw File blob
+  status: 'uploading' | 'done' | 'error';
+  assetId?: string;               // UUID returned by backend after upload
+  previewUrl: string;             // local blob URL for instant preview
+  thumbnailUrl?: string;          // server thumbnail URL (set after upload)
+  url?: string;                   // server original URL (set after upload)
+}
+
 interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -13,12 +23,17 @@ interface ChatState {
   streamingMessageId: string | null;
   activeNodes: string[];
   totalConversations: number;
+  isNewChatMode: boolean; // true after resetChat() — blocks ConversationPage from restoring old conv
+  pendingAttachments: PendingAttachment[];
+  // Image generation
+  imageGenerationMode: boolean;
+  imageCount: 1 | 2 | 4;
 
   // Actions
   fetchConversations: (page?: number) => Promise<void>;
   setActiveConversation: (id: string | null) => void;
   fetchMessages: (conversationId: string) => Promise<void>;
-  addOptimisticUserMessage: (content: string, conversationId: string) => void;
+  addOptimisticUserMessage: (content: string, conversationId: string, attachments?: PendingAttachment[]) => void;
   setStreamingState: (isStreaming: boolean) => void;
   appendStreamToken: (token: string) => void;
   finalizeStreamMessage: (message: Message) => void;
@@ -35,6 +50,14 @@ interface ChatState {
   shareConversationPrivate: (convId: string, username: string) => Promise<ShareUser>;
   unshareConversationPrivate: (convId: string, username: string) => Promise<void>;
   fetchConversationShares: (convId: string) => Promise<ShareUser[]>;
+  // Attachment actions
+  addAttachment: (attachment: PendingAttachment) => void;
+  updateAttachment: (clientId: string, updates: Partial<PendingAttachment>) => void;
+  removeAttachment: (clientId: string) => void;
+  clearAttachments: () => void;
+  // Image generation actions
+  toggleImageGenerationMode: () => void;
+  setImageCount: (count: 1 | 2 | 4) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -46,6 +69,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingMessageId: null,
   activeNodes: [],
   totalConversations: 0,
+  isNewChatMode: false,
+  pendingAttachments: [],
+  imageGenerationMode: false,
+  imageCount: 1,
 
   fetchConversations: async (page = 1) => {
     try {
@@ -78,13 +105,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addOptimisticUserMessage: (content, conversationId) => {
+  addOptimisticUserMessage: (content, conversationId, attachments = []) => {
+    // Build multimodal content blocks for instant display
+    const contentBlocks: ContentBlock[] = [
+      { type: 'text', text: content },
+      ...attachments
+        .filter((a) => a.status === 'done')
+        .map((a) => ({
+          type: 'image_url' as const,
+          url: a.thumbnailUrl || a.previewUrl,
+          asset_id: a.assetId,
+        })),
+    ];
     const tempMessage: Message = {
       id: `temp-${Date.now()}`,
       conversation_id: conversationId,
       parent_message_id: null,
       role: 'user',
-      content: [{ type: 'text', text: content }],
+      content: contentBlocks,
       model_id: null,
       input_tokens: null,
       output_tokens: null,
@@ -161,9 +199,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setConversationIdFromStream: (id) => {
-    set((state) => ({
+    set({
       activeConversationId: id,
-    }));
+      isNewChatMode: false, // New conversation is now established — allow ConversationPage to load normally
+    });
   },
 
   resetChat: () => {
@@ -173,6 +212,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingContent: '',
       isStreaming: false,
       activeNodes: [],
+      isNewChatMode: true,
+      imageGenerationMode: false, // reset on new chat
     });
   },
 
@@ -207,5 +248,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchConversationShares: async (convId) => {
     return await api.get<ShareUser[]>(`/conversations/${convId}/shares`);
+  },
+
+  // ── Attachment lifecycle ──────────────────────────────────────────────────
+  addAttachment: (attachment) => {
+    set((state) => ({ pendingAttachments: [...state.pendingAttachments, attachment] }));
+  },
+
+  updateAttachment: (clientId, updates) => {
+    set((state) => ({
+      pendingAttachments: state.pendingAttachments.map((a) =>
+        a.clientId === clientId ? { ...a, ...updates } : a
+      ),
+    }));
+  },
+
+  removeAttachment: (clientId) => {
+    set((state) => {
+      const target = state.pendingAttachments.find((a) => a.clientId === clientId);
+      // Revoke the local object URL to free memory
+      if (target?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(target.previewUrl);
+      return { pendingAttachments: state.pendingAttachments.filter((a) => a.clientId !== clientId) };
+    });
+  },
+
+  clearAttachments: () => {
+    const { pendingAttachments } = get();
+    // Revoke all blob URLs before clearing
+    pendingAttachments.forEach((a) => {
+      if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl);
+    });
+    set({ pendingAttachments: [] });
+  },
+
+  // ── Image generation ──────────────────────────────────────────────────────
+  toggleImageGenerationMode: () => {
+    set((state) => ({ imageGenerationMode: !state.imageGenerationMode }));
+  },
+
+  setImageCount: (count) => {
+    set({ imageCount: count });
   },
 }));

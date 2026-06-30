@@ -42,3 +42,7 @@ class AgentState(TypedDict):
     finish_reason: str
     error_message: str
 
+    # ── Image Generation ─────────────────────────────────────────
+    image_generation_mode: bool         # True when user requests image gen
+    image_n: int                        # Number of images to generate (1-4)
+    generated_image_assets: list[dict]  # [{asset_id, url, thumbnail_url}]

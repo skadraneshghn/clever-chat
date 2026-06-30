@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from PIL import Image
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -67,15 +68,18 @@ async def upload_media(
     with open(full_path, "wb") as f:
         f.write(content)
 
-    # Get image dimensions if applicable
+    # Process images for metadata and thumbnails
     width, height = None, None
     if file.content_type and file.content_type.startswith("image/"):
         try:
-            from PIL import Image
-            img = Image.open(full_path)
-            width, height = img.size
-        except Exception:
-            pass
+            with Image.open(full_path) as img:
+                width, height = img.size
+                # Generate thumbnail
+                thumbnail_path = file_path / f"{file_id}_thumb{ext}"
+                img.thumbnail((200, 200))
+                img.save(thumbnail_path)
+        except Exception as e:
+            logger.error("thumbnail_generation_failed", error=str(e))
 
     # Create asset record
     asset = MediaAsset(
@@ -100,6 +104,8 @@ async def upload_media(
         "size_bytes": asset.size_bytes,
         "width": width,
         "height": height,
+        "url": f"/api/v1/media/{file_id}",
+        "thumbnail_url": f"/api/v1/media/{file_id}/thumbnail" if asset.mime_type.startswith("image/") else None,
     }
 
 
@@ -131,6 +137,30 @@ async def get_media(
     )
 
 
+@router.get("/{asset_id}/thumbnail")
+async def get_thumbnail(
+    asset_id: uuid.UUID,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a media thumbnail."""
+    result = await db.execute(
+        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.user_id == user.id)
+    )
+    asset = result.scalar_one_or_none()
+    if not asset or not asset.mime_type.startswith("image/"):
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+    settings = get_settings()
+    ext = Path(asset.original_filename).suffix
+    thumb_path = settings.upload_path / str(user.id) / f"{asset.id}_thumb{ext}"
+
+    if not thumb_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not generated")
+
+    return FileResponse(str(thumb_path), media_type=asset.mime_type)
+
+
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_media(
     asset_id: uuid.UUID,
@@ -147,8 +177,13 @@ async def delete_media(
 
     # Delete file from disk
     settings = get_settings()
-    file_path = settings.upload_path / str(user.id) / f"{asset.id}{Path(asset.original_filename).suffix}"
+    ext = Path(asset.original_filename).suffix
+    file_path = settings.upload_path / str(user.id) / f"{asset.id}{ext}"
+    thumb_path = settings.upload_path / str(user.id) / f"{asset.id}_thumb{ext}"
+    
     if file_path.exists():
         file_path.unlink()
+    if thumb_path.exists():
+        thumb_path.unlink()
 
     await db.delete(asset)
