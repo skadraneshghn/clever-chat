@@ -8,7 +8,7 @@
 import { useEffect, useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
   Paperclip, Mic, ArrowUp, X, Square, Zap, Eye, EyeOff, Sparkles,
-  FileText, Video, Music
+  FileText, Video, Music, FileSpreadsheet, FileCode, File, FileImage
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useChatStore } from '@/stores/chatStore';
@@ -21,6 +21,134 @@ import ResourceModal from './ResourceModal';
 
 interface InputBarProps {
   conversationId?: string | null;
+}
+
+function getResourceTypeDetails(filename: string, mimeType: string) {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+
+  if (mimeType.startsWith('image/')) {
+    return { icon: FileImage, color: '#3b82f6', label: ext.toUpperCase() || 'IMG' };
+  }
+
+  if (mimeType.startsWith('audio/')) {
+    return { icon: Music, color: '#8b5cf6', label: ext.toUpperCase() || 'AUDIO' };
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return { icon: Video, color: '#f97316', label: ext.toUpperCase() || 'VIDEO' };
+  }
+
+  if (mimeType === 'application/pdf') {
+    return { icon: FileText, color: '#ef4444', label: 'PDF' };
+  }
+
+  if (
+    mimeType.includes('spreadsheet') ||
+    mimeType === 'text/csv' ||
+    ['xls', 'xlsx', 'csv'].includes(ext)
+  ) {
+    return { icon: FileSpreadsheet, color: '#10b981', label: ext.toUpperCase() || 'XLS' };
+  }
+
+  if (
+    mimeType.includes('word') ||
+    ['doc', 'docx', 'rtf', 'odt'].includes(ext)
+  ) {
+    return { icon: FileText, color: '#2563eb', label: ext.toUpperCase() || 'DOC' };
+  }
+
+  if (
+    mimeType.startsWith('text/') ||
+    mimeType.includes('json') ||
+    mimeType.includes('javascript') ||
+    mimeType.includes('typescript') ||
+    mimeType.includes('xml') ||
+    ['md', 'txt', 'json', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'xml', 'yml', 'yaml'].includes(ext)
+  ) {
+    return { icon: FileCode, color: '#38bdf8', label: ext.toUpperCase() || 'TEXT' };
+  }
+
+  return { icon: File, color: 'var(--text-muted)', label: ext.toUpperCase() || 'FILE' };
+}
+
+function AuthenticatedThumbnail({ src, alt }: { src: string; alt: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let objectUrl: string | null = null;
+
+    const load = async () => {
+      try {
+        setHasError(false);
+        setBlobUrl(null);
+
+        const resolvedSrc = src.startsWith('http')
+          ? src
+          : `${process.env.NEXT_PUBLIC_API_URL || ''}${src}`;
+
+        const response = await fetch(resolvedSrc, {
+          headers: api.getAuthHeaders(),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Thumbnail request failed: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        if (!isCancelled) {
+          setBlobUrl(objectUrl);
+        }
+      } catch {
+        if (!isCancelled) {
+          setHasError(true);
+        }
+      }
+    };
+
+    if (src) {
+      load();
+    } else {
+      setHasError(true);
+    }
+
+    return () => {
+      isCancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [src]);
+
+  if (hasError || !blobUrl) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--surface-1, #1e293b)',
+        color: 'var(--text-muted)',
+        fontSize: 11,
+        fontWeight: 600,
+      }}>
+        {hasError ? 'Preview unavailable' : 'Loading...'}
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={blobUrl}
+      alt={alt}
+      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+    />
+  );
 }
 
 export default function InputBar({ conversationId }: InputBarProps) {
@@ -301,6 +429,8 @@ export default function InputBar({ conversationId }: InputBarProps) {
               {/* Server attached resources */}
               {attachedResources.map((file) => {
                 const isImage = file.mime_type.startsWith('image/');
+                const resourceType = getResourceTypeDetails(file.filename, file.mime_type);
+                const ResourceIcon = resourceType.icon;
                 return (
                   <motion.div
                     key={file.id}
@@ -323,11 +453,9 @@ export default function InputBar({ conversationId }: InputBarProps) {
                         overflow: 'hidden',
                         border: '1px solid var(--border-subtle)',
                       }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.thumbnail_url || file.url}`}
+                        <AuthenticatedThumbnail
+                          src={file.thumbnail_url || file.url}
                           alt={file.filename}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         />
                       </div>
                     ) : (
@@ -343,13 +471,9 @@ export default function InputBar({ conversationId }: InputBarProps) {
                         alignItems: 'start',
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {file.mime_type.startsWith('audio/') ? <Music size={13} style={{ color: '#8b5cf6' }} /> : (
-                            file.mime_type.startsWith('video/') ? <Video size={13} style={{ color: '#f97316' }} /> : (
-                              <FileText size={13} style={{ color: '#ef4444' }} />
-                            )
-                          )}
+                          <ResourceIcon size={13} style={{ color: resourceType.color }} />
                           <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                            {file.filename.split('.').pop() || 'doc'}
+                            {resourceType.label}
                           </span>
                         </div>
                         <span style={{
