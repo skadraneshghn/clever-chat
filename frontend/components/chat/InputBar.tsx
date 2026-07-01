@@ -5,9 +5,10 @@
    active file attachment state, and speech-to-text placeholder feature
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { useState, useRef, useCallback, KeyboardEvent } from 'react';
+import { useEffect, useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
   Paperclip, Mic, ArrowUp, X, Square, Zap, Eye, EyeOff, Sparkles,
+  FileText, Video, Music, Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useChatStore } from '@/stores/chatStore';
@@ -16,6 +17,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import ResourceModal from './ResourceModal';
 
 interface InputBarProps {
   conversationId?: string | null;
@@ -26,16 +28,41 @@ export default function InputBar({ conversationId }: InputBarProps) {
   const [isFocused, setIsFocused] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [resourceModalOpen, setResourceModalOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { isStreaming, conversations, pendingAttachments, addAttachment, updateAttachment, removeAttachment,
     imageGenerationMode, imageCount, toggleImageGenerationMode, setImageCount,
+    activeChatResourceIds, fetchActiveChatResources, files, fetchFiles, detachResourceFromChat,
+    createConversation,
   } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
   const { availableModels } = useProviderStore();
+
+  useEffect(() => {
+    if (conversationId) {
+      fetchActiveChatResources(conversationId);
+      fetchFiles();
+    }
+  }, [conversationId, fetchActiveChatResources, fetchFiles]);
+
+  const attachedResources = files.filter((f) => activeChatResourceIds.includes(f.id));
+
+  const handleAttachClick = async () => {
+    if (!conversationId) {
+      try {
+        const newConv = await createConversation('New Chat');
+        setTimeout(() => setResourceModalOpen(true), 50);
+      } catch (err) {
+        toast.error('Failed to start a new chat session for attachments');
+      }
+    } else {
+      setResourceModalOpen(true);
+    }
+  };
 
   const activeConv = conversations.find(c => c.id === conversationId);
   const isShared = activeConv?.is_shared || false;
@@ -62,6 +89,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
       max_tokens: preferences.default_max_tokens,
       system_prompt: preferences.default_system_prompt || undefined,
       hidden_from_owner: hiddenFromOwner,
+      media_asset_ids: activeChatResourceIds,
     });
 
     setMessage('');
@@ -70,7 +98,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [message, pendingAttachments, isStreaming, sendMessage, conversationId, preferences, hiddenFromOwner]);
+  }, [message, pendingAttachments, isStreaming, sendMessage, conversationId, preferences, hiddenFromOwner, activeChatResourceIds]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && preferences.send_on_enter) {
@@ -246,9 +274,9 @@ export default function InputBar({ conversationId }: InputBarProps) {
           )}
         </AnimatePresence>
 
-        {/* Image attachment preview strip */}
+        {/* Unified resources & local uploads preview strip */}
         <AnimatePresence>
-          {pendingAttachments.length > 0 && (
+          {(pendingAttachments.length > 0 || attachedResources.length > 0) && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
@@ -257,10 +285,111 @@ export default function InputBar({ conversationId }: InputBarProps) {
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 8,
-                padding: '6px 4px 0',
+                padding: '6px 4px 8px',
                 overflow: 'hidden',
+                borderBottom: '1px solid var(--border-subtle)',
+                marginBottom: '10px'
               }}
             >
+              {/* Server attached resources */}
+              {attachedResources.map((file) => {
+                const isImage = file.mime_type.startsWith('image/');
+                return (
+                  <motion.div
+                    key={file.id}
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    style={{
+                      position: 'relative',
+                      width: isImage ? 72 : 124,
+                      height: 72,
+                      borderRadius: 10,
+                      overflow: 'visible',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isImage ? (
+                      <div style={{
+                        width: '100%', height: '100%',
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        border: '1px solid var(--border-subtle)',
+                      }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.thumbnail_url || file.url}`}
+                          alt={file.filename}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      </div>
+                    ) : (
+                      <div style={{
+                        width: '100%', height: '100%',
+                        borderRadius: 10,
+                        background: 'var(--surface-1, #1e293b)',
+                        border: '1px solid var(--border-subtle)',
+                        padding: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        alignItems: 'start',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {file.mime_type.startsWith('audio/') ? <Music size={13} style={{ color: '#8b5cf6' }} /> : (
+                            file.mime_type.startsWith('video/') ? <Video size={13} style={{ color: '#f97316' }} /> : (
+                              <FileText size={13} style={{ color: '#ef4444' }} />
+                            )
+                          )}
+                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                            {file.filename.split('.').pop() || 'doc'}
+                          </span>
+                        </div>
+                        <span style={{
+                          fontSize: '11px',
+                          color: 'var(--text-primary)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          width: '100%',
+                          fontWeight: 500,
+                          textAlign: 'left'
+                        }}>
+                          {file.filename}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Detach button */}
+                    <button
+                      onClick={() => conversationId && detachResourceFromChat(conversationId, file.id)}
+                      style={{
+                        position: 'absolute',
+                        top: -6, right: -6,
+                        width: 18, height: 18,
+                        borderRadius: '50%',
+                        background: '#111',
+                        border: '1.5px solid rgba(255,255,255,0.2)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        zIndex: 2,
+                        padding: 0,
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#ef4444'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = '#111'; }}
+                      title="Detach file"
+                    >
+                      <X size={10} />
+                    </button>
+                  </motion.div>
+                );
+              })}
+
+              {/* Local pending attachments */}
               {pendingAttachments.map((att) => (
                 <motion.div
                   key={att.clientId}
@@ -275,7 +404,6 @@ export default function InputBar({ conversationId }: InputBarProps) {
                     flexShrink: 0,
                   }}
                 >
-                  {/* Image thumbnail */}
                   <div style={{
                     width: '100%', height: '100%',
                     borderRadius: 10,
@@ -292,7 +420,6 @@ export default function InputBar({ conversationId }: InputBarProps) {
                     />
                   </div>
 
-                  {/* Upload overlay */}
                   {att.status === 'uploading' && (
                     <div style={{
                       position: 'absolute', inset: 0,
@@ -314,7 +441,6 @@ export default function InputBar({ conversationId }: InputBarProps) {
                     </div>
                   )}
 
-                  {/* Error overlay */}
                   {att.status === 'error' && (
                     <div style={{
                       position: 'absolute', inset: 0,
@@ -329,7 +455,6 @@ export default function InputBar({ conversationId }: InputBarProps) {
                     }}>Failed</div>
                   )}
 
-                  {/* Remove button */}
                   <button
                     onClick={() => removeAttachment(att.clientId)}
                     style={{
@@ -406,17 +531,17 @@ export default function InputBar({ conversationId }: InputBarProps) {
           }}>
             {/* Left buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {/* Image attach button */}
+              {/* Resource attach button */}
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleAttachClick}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 32, height: 32,
-                  background: pendingAttachments.length > 0 ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)',
-                  border: `1px solid ${pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--border-default)'}`,
+                  background: (pendingAttachments.length > 0 || attachedResources.length > 0) ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)',
+                  border: `1px solid ${(pendingAttachments.length > 0 || attachedResources.length > 0) ? 'var(--accent-primary)' : 'var(--border-default)'}`,
                   borderRadius: 'var(--radius-pill)',
                   cursor: 'pointer',
-                  color: pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  color: (pendingAttachments.length > 0 || attachedResources.length > 0) ? 'var(--accent-primary)' : 'var(--text-secondary)',
                   boxShadow: 'var(--shadow-xs)',
                   transition: 'all var(--transition-fast)',
                 }}
@@ -425,10 +550,10 @@ export default function InputBar({ conversationId }: InputBarProps) {
                   e.currentTarget.style.borderColor = 'var(--border-strong)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = pendingAttachments.length > 0 ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)';
-                  e.currentTarget.style.borderColor = pendingAttachments.length > 0 ? 'var(--accent-primary)' : 'var(--border-default)';
+                  e.currentTarget.style.background = (pendingAttachments.length > 0 || attachedResources.length > 0) ? 'var(--accent-primary-soft)' : 'var(--bg-secondary)';
+                  e.currentTarget.style.borderColor = (pendingAttachments.length > 0 || attachedResources.length > 0) ? 'var(--accent-primary)' : 'var(--border-default)';
                 }}
-                title="Attach images"
+                title="Attach chat resources"
               >
                 <Paperclip size={14} />
               </button>
@@ -704,6 +829,11 @@ export default function InputBar({ conversationId }: InputBarProps) {
       }}>
         {preferences.send_on_enter ? 'Press Enter to send, Shift+Enter for new line' : 'Press Ctrl+Enter to send'}
       </div>
+      <ResourceModal
+        isOpen={resourceModalOpen}
+        onClose={() => setResourceModalOpen(false)}
+        conversationId={conversationId || ''}
+      />
     </div>
   );
 }

@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     # ── File Storage ─────────────────────────────────────────────
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
+    CELLAR_ADDON_HOST: str = "cellar-c2.services.clever-cloud.com"
+    CELLAR_ADDON_KEY_ID: str = "RD180HYLWYFRPAVOMZHN"
+    CELLAR_ADDON_KEY_SECRET: str = "8aNfSsoP3Q7RtBb1GuffdQxbhrXVB0kuqJ77wrlX"
+    CELLAR_BUCKET: str = "cleverchat-media"
 
     @property
     def upload_path(self) -> Path:

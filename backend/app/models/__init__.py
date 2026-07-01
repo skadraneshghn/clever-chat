@@ -5,6 +5,7 @@ from app.models.conversation_share import ConversationShare
 from app.models.discovered_model import DiscoveredModel
 from app.models.embeddings import DocumentChunk, MessageEmbedding
 from app.models.media_asset import MediaAsset
+from app.models.chat_resource import ChatResource
 from app.models.message import Message
 from app.models.provider_connection import ProviderConnection
 from app.models.session import Session
@@ -19,6 +20,7 @@ __all__ = [
     "Message",
     "UserPreferences",
     "MediaAsset",
+    "ChatResource",
     "MessageEmbedding",
     "DocumentChunk",
     "ProviderConnection",

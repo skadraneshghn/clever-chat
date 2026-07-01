@@ -137,6 +137,15 @@ async def prompt_builder(state: AgentState) -> dict:
             f"\n\n--- Relevant Context ---\n{context_text}\n--- End Context ---"
         )
 
+    # Add attached documents context
+    for ref in media_refs:
+        if ref.get("extracted_text"):
+            prompt_parts.append(
+                f"\n\n--- Attached Document: {ref.get('filename', 'Unnamed')} ---\n"
+                f"{ref['extracted_text']}\n"
+                f"--- End Document ---"
+            )
+
     # Add media transcriptions
     for ref in media_refs:
         if ref.get("transcription"):

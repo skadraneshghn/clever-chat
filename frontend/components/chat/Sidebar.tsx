@@ -11,7 +11,7 @@ import {
   Plus, Search, Settings, Trash2, Pin,
   LogOut, ChevronLeft, MessageSquare,
   LayoutDashboard, FileText, Zap, Cpu, PenSquare, Bot, Sparkles,
-  MoreHorizontal, Share2, Users, Edit2, Archive
+  MoreHorizontal, Share2, Users, Edit2, Archive, Folder
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -29,6 +29,7 @@ const NAV_SECTIONS = [
       { icon: <LayoutDashboard size={15} />, label: 'Dashboard',      href: '/' },
       { icon: <PenSquare size={15} />,       label: 'New Chat',       action: 'new' },
       { icon: <FileText size={15} />,        label: 'Conversations',  href: '/' },
+      { icon: <Folder size={15} />,          label: 'Files Manager',  href: '/files' },
       { icon: <Sparkles size={15} />,        label: 'AI Assistant',   href: '/', active: true },
     ],
   },

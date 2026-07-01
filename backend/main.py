@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
         discovered_model,
         embeddings,
         media_asset,
+        chat_resource,
         message,
         provider_connection,
         session,
@@ -115,10 +116,67 @@ async def lifespan(app: FastAPI):
                     "chat_bg_pattern VARCHAR(32) NOT NULL DEFAULT 'none'"
                 )
             )
+            # Ensure media_assets advanced columns exist
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "file_hash VARCHAR(64)"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "source_url TEXT"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "status VARCHAR(32) NOT NULL DEFAULT 'completed'"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "extraction_status VARCHAR(32) NOT NULL DEFAULT 'none'"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "token_count INTEGER"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "extracted_text TEXT"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "folder_name VARCHAR(255)"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS "
+                    "updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+                )
+            )
         logger.info("database_tables_created")
     except Exception as exc:
         logger.error("database_setup_failed", error=str(exc))
         raise  # Re-raise so worker fails fast with a clear error
+
+    # Initialize S3 Cellar bucket
+    try:
+        from app.services.s3_storage import ensure_bucket_exists
+        ensure_bucket_exists()
+        logger.info("s3_storage_initialized")
+    except Exception as exc:
+        logger.error("s3_storage_initialization_failed", error=str(exc))
 
     # 3. Process pool for CPU-bound work
     init_process_pool()

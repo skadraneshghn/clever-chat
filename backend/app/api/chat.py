@@ -72,23 +72,79 @@ async def chat_stream(
     # Save user message — build multimodal content blocks if images are attached
     content_blocks: list[dict] = [{"type": "text", "text": body.message}]
 
-    # Resolve attached image assets
-    image_assets = []
+    # Resolve attached media assets (images, documents, sheets, audio, etc.)
+    media_refs = []
+    from app.models.media_asset import MediaAsset
+    from app.models.chat_resource import ChatResource
+
+    # Resolve all asset IDs (combine explicitly passed ones and already attached ones)
+    resolved_ids = list(body.media_asset_ids)
+    if conversation.id:
+        res_ids_query = await db.execute(
+            select(ChatResource.media_asset_id).where(
+                ChatResource.conversation_id == conversation.id,
+                ChatResource.is_active == True
+            )
+        )
+        for rid in res_ids_query.scalars().all():
+            if rid not in resolved_ids:
+                resolved_ids.append(rid)
+
+    # Save join bindings for newly sent assets
     if body.media_asset_ids:
-        from app.models.media_asset import MediaAsset
+        for asset_id in body.media_asset_ids:
+            dup = await db.execute(
+                select(ChatResource).where(
+                    ChatResource.conversation_id == conversation.id,
+                    ChatResource.media_asset_id == asset_id
+                )
+            )
+            if not dup.scalar_one_or_none():
+                db.add(ChatResource(
+                    conversation_id=conversation.id,
+                    media_asset_id=asset_id,
+                    is_active=True
+                ))
+        await db.flush()
+
+    if resolved_ids:
         asset_result = await db.execute(
             select(MediaAsset).where(
-                MediaAsset.id.in_(body.media_asset_ids),
+                MediaAsset.id.in_(resolved_ids),
                 MediaAsset.user_id == user.id,
             )
         )
-        image_assets = asset_result.scalars().all()
-        for asset in image_assets:
+        all_assets = asset_result.scalars().all()
+        for asset in all_assets:
+            asset_type = "image" if asset.mime_type.startswith("image/") else (
+                "audio" if asset.mime_type.startswith("audio/") else (
+                    "video" if asset.mime_type.startswith("video/") else "document"
+                )
+            )
+            media_refs.append({
+                "id": str(asset.id),
+                "type": asset_type,
+                "filename": asset.original_filename,
+                "mime_type": asset.mime_type,
+                "url": f"/api/v1/media/{asset.id}",
+                "extracted_text": asset.extracted_text,
+                "transcription": asset.transcription,
+                "token_count": asset.token_count,
+            })
+            
             if asset.mime_type.startswith("image/"):
                 content_blocks.append({
                     "type": "image_url",
                     "image_url": {"url": f"/api/v1/media/{asset.id}"},
                     "asset_id": str(asset.id),
+                })
+            else:
+                content_blocks.append({
+                    "type": asset_type,
+                    "asset_id": str(asset.id),
+                    "url": f"/api/v1/media/{asset.id}",
+                    "mime_type": asset.mime_type,
+                    "text": asset.original_filename,
                 })
 
     user_message = Message(
@@ -185,7 +241,7 @@ async def chat_stream(
         "system_prompt": body.system_prompt or conversation.system_prompt or settings.DEFAULT_SYSTEM_PROMPT,
         "retrieved_context": [],
         "search_performed": False,
-        "media_refs": [],
+        "media_refs": media_refs,
         "tool_calls": [],
         "tool_results": [],
         "needs_retrieval": False,

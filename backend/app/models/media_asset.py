@@ -35,10 +35,24 @@ class MediaAsset(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Images only
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Audio/video only
     transcription: Mapped[str | None] = mapped_column(Text, nullable=True)  # Whisper output
+    
+    # Advanced File & Ingestion Management
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed", server_default="completed")
+    extraction_status: Mapped[str] = mapped_column(String(32), nullable=False, default="none", server_default="none")
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    folder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
+        server_default=func.now(), onupdate=lambda: datetime.now(UTC),
+    )
 
     def __repr__(self) -> str:
-        return f"<MediaAsset {self.id} {self.mime_type}>"
+        return f"<MediaAsset {self.id} {self.mime_type} folder={self.folder_name}>"

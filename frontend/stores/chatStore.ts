@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import type { Conversation, Message, ContentBlock, ShareUser } from '@/types';
 import { api } from '@/lib/api';
+import { toast } from 'sonner';
 
 export interface PendingAttachment {
   clientId: string;               // browser-local unique ID
@@ -58,6 +59,18 @@ interface ChatState {
   // Image generation actions
   toggleImageGenerationMode: () => void;
   setImageCount: (count: 1 | 2 | 4) => void;
+
+  // Advanced File Manager state & actions
+  files: any[];
+  folders: any[];
+  activeChatResourceIds: string[];
+  fetchFiles: () => Promise<void>;
+  deleteFile: (id: string) => Promise<void>;
+  uploadFromUrl: (url: string) => Promise<any>;
+  organizeFiles: (strategy: string) => Promise<void>;
+  fetchActiveChatResources: (convId: string) => Promise<void>;
+  attachResourcesToChat: (convId: string, ids: string[]) => Promise<void>;
+  detachResourceFromChat: (convId: string, id: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -73,6 +86,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingAttachments: [],
   imageGenerationMode: false,
   imageCount: 1,
+  files: [],
+  folders: [],
+  activeChatResourceIds: [],
 
   fetchConversations: async (page = 1) => {
     try {
@@ -288,5 +304,82 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setImageCount: (count) => {
     set({ imageCount: count });
+  },
+
+  // ── Advanced File Manager actions ─────────────────────────────────────────
+  fetchFiles: async () => {
+    try {
+      const files = await api.get<any[]>('/media');
+      set({ files });
+    } catch (err) {
+      console.error('Failed to fetch files:', err);
+    }
+  },
+
+  deleteFile: async (id) => {
+    try {
+      await api.delete(`/media/${id}`);
+      set((state) => ({
+        files: state.files.filter((f) => f.id !== id),
+        activeChatResourceIds: state.activeChatResourceIds.filter((cid) => cid !== id),
+      }));
+    } catch (err) {
+      console.error('Failed to delete file:', err);
+      toast.error('Failed to delete file');
+    }
+  },
+
+  uploadFromUrl: async (url) => {
+    try {
+      const result = await api.post<any>('/media/url', { url });
+      set((state) => ({ files: [result, ...state.files] }));
+      return result;
+    } catch (err) {
+      console.error('Failed to upload from URL:', err);
+      toast.error('Failed to download file from link');
+      throw err;
+    }
+  },
+
+  organizeFiles: async (strategy) => {
+    try {
+      const files = await api.post<any[]>('/media/organize', { strategy });
+      set({ files });
+    } catch (err) {
+      console.error('Failed to organize files:', err);
+    }
+  },
+
+  fetchActiveChatResources: async (convId) => {
+    try {
+      const resources = await api.get<any[]>(`/media/conversations/${convId}/resources`);
+      set({ activeChatResourceIds: resources.map((r) => r.id) });
+    } catch (err) {
+      console.error('Failed to fetch active resources:', err);
+    }
+  },
+
+  attachResourcesToChat: async (convId, ids) => {
+    try {
+      await api.post(`/media/conversations/${convId}/attach`, { media_asset_ids: ids });
+      set((state) => {
+        const current = new Set(state.activeChatResourceIds);
+        ids.forEach(id => current.add(id));
+        return { activeChatResourceIds: Array.from(current) };
+      });
+    } catch (err) {
+      console.error('Failed to attach resources:', err);
+    }
+  },
+
+  detachResourceFromChat: async (convId, id) => {
+    try {
+      await api.delete(`/media/conversations/${convId}/detach/${id}`);
+      set((state) => ({
+        activeChatResourceIds: state.activeChatResourceIds.filter((cid) => cid !== id),
+      }));
+    } catch (err) {
+      console.error('Failed to detach resource:', err);
+    }
   },
 }));
