@@ -8,7 +8,7 @@
 import { useEffect, useState, useRef, useCallback, KeyboardEvent } from 'react';
 import {
   Paperclip, Mic, ArrowUp, X, Square, Zap, Eye, EyeOff, Sparkles,
-  FileText, Video, Music, Image as ImageIcon
+  FileText, Video, Music
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useChatStore } from '@/stores/chatStore';
@@ -36,27 +36,29 @@ export default function InputBar({ conversationId }: InputBarProps) {
   const { isStreaming, conversations, pendingAttachments, addAttachment, updateAttachment, removeAttachment,
     imageGenerationMode, imageCount, toggleImageGenerationMode, setImageCount,
     activeChatResourceIds, fetchActiveChatResources, files, fetchFiles, detachResourceFromChat,
+    activeConversationId,
     createConversation,
   } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
   const { availableModels } = useProviderStore();
+  const effectiveConversationId = conversationId || activeConversationId;
 
   useEffect(() => {
-    if (conversationId) {
-      fetchActiveChatResources(conversationId);
+    if (effectiveConversationId) {
+      fetchActiveChatResources(effectiveConversationId);
       fetchFiles();
     }
-  }, [conversationId, fetchActiveChatResources, fetchFiles]);
+  }, [effectiveConversationId, fetchActiveChatResources, fetchFiles]);
 
   const attachedResources = files.filter((f) => activeChatResourceIds.includes(f.id));
 
   const handleAttachClick = async () => {
-    if (!conversationId) {
+    if (!effectiveConversationId) {
       try {
-        const newConv = await createConversation('New Chat');
+        await createConversation('New Chat');
         setTimeout(() => setResourceModalOpen(true), 50);
-      } catch (err) {
+      } catch {
         toast.error('Failed to start a new chat session for attachments');
       }
     } else {
@@ -64,7 +66,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
     }
   };
 
-  const activeConv = conversations.find(c => c.id === conversationId);
+  const activeConv = conversations.find(c => c.id === effectiveConversationId);
   const isShared = activeConv?.is_shared || false;
   const [hiddenFromOwner, setHiddenFromOwner] = useState(false);
 
@@ -81,15 +83,20 @@ export default function InputBar({ conversationId }: InputBarProps) {
       return;
     }
 
+    const mergedMediaAssetIds = Array.from(new Set([
+      ...activeChatResourceIds,
+      ...pendingAttachments.filter((a) => a.status === 'done' && a.assetId).map((a) => a.assetId as string),
+    ]));
+
     sendMessage({
-      conversation_id: conversationId || undefined,
+      conversation_id: effectiveConversationId || undefined,
       message: trimmed,
       model_id: preferences.default_model_id,
       temperature: preferences.default_temperature,
       max_tokens: preferences.default_max_tokens,
       system_prompt: preferences.default_system_prompt || undefined,
       hidden_from_owner: hiddenFromOwner,
-      media_asset_ids: activeChatResourceIds,
+      media_asset_ids: mergedMediaAssetIds.length > 0 ? mergedMediaAssetIds : undefined,
     });
 
     setMessage('');
@@ -98,7 +105,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [message, pendingAttachments, isStreaming, sendMessage, conversationId, preferences, hiddenFromOwner, activeChatResourceIds]);
+  }, [message, pendingAttachments, isStreaming, sendMessage, effectiveConversationId, preferences, hiddenFromOwner, activeChatResourceIds, setHiddenFromOwner]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && preferences.send_on_enter) {
@@ -139,7 +146,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
           : undefined,
         url: `${process.env.NEXT_PUBLIC_API_URL || ''}${result.url}`,
       });
-    } catch (err) {
+    } catch {
       updateAttachment(clientId, { status: 'error' });
       toast.error(`Upload failed for "${file.name}"`);
     }
@@ -362,7 +369,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
 
                     {/* Detach button */}
                     <button
-                      onClick={() => conversationId && detachResourceFromChat(conversationId, file.id)}
+                    onClick={() => effectiveConversationId && detachResourceFromChat(effectiveConversationId, file.id)}
                       style={{
                         position: 'absolute',
                         top: -6, right: -6,
@@ -832,7 +839,7 @@ export default function InputBar({ conversationId }: InputBarProps) {
       <ResourceModal
         isOpen={resourceModalOpen}
         onClose={() => setResourceModalOpen(false)}
-        conversationId={conversationId || ''}
+        conversationId={effectiveConversationId || ''}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useChatStore } from '@/stores/chatStore';
 import type { ChatStreamRequest, Message } from '@/types';
@@ -15,7 +15,9 @@ export function useSSEStream() {
   const pathname = usePathname();
   // Keep a ref so the stale-closure inside useCallback always reads the latest pathname
   const pathnameRef = useRef(pathname);
-  pathnameRef.current = pathname;
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
   const {
     appendStreamToken,
     setStreamingState,
@@ -43,11 +45,15 @@ export function useSSEStream() {
       // Collect successfully uploaded attachments from the store
       const doneAttachments = pendingAttachments.filter((a) => a.status === 'done');
       const assetIds = doneAttachments.map((a) => a.assetId!).filter(Boolean);
+      const mediaAssetIds = Array.from(new Set([
+        ...(request.media_asset_ids || []),
+        ...assetIds,
+      ]));
 
       // Patch request with asset IDs + image generation flags
       const fullRequest: ChatStreamRequest = {
         ...request,
-        media_asset_ids: assetIds.length > 0 ? assetIds : undefined,
+        media_asset_ids: mediaAssetIds.length > 0 ? mediaAssetIds : undefined,
         image_generation_mode: imageGenerationMode || undefined,
         image_n: imageGenerationMode ? imageCount : undefined,
       };
@@ -181,10 +187,10 @@ export function useSSEStream() {
             setStreamingState(false);
           },
         });
-      } catch (err: any) {
-        if (err?.name !== 'AbortError') {
+      } catch (err) {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
           console.error('Stream failed:', err);
-          toast.error(err?.message || 'Connection to streaming endpoint failed');
+          toast.error(err instanceof Error ? err.message : 'Connection to streaming endpoint failed');
         }
         setStreamingState(false);
       }
@@ -204,6 +210,7 @@ export function useSSEStream() {
       clearAttachments,
       imageGenerationMode,
       imageCount,
+      router,
     ]
   );
 
