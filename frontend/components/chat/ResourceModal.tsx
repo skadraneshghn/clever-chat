@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FolderOpen, Upload, Globe, Search, X, Check, FileText, Video,
-  Image as ImageIcon, Music, AlertTriangle, Sparkles, CheckCircle2, Loader2
+  Image as ImageIcon, Music, AlertTriangle, Sparkles, CheckCircle2, Loader2,
+  Calendar, Layers, Link
 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { api } from '@/lib/api';
@@ -16,7 +17,7 @@ interface ResourceModalProps {
   onClose: () => void;
 }
 
-// Format bytes
+// Format bytes helper
 function formatBytes(bytes: number, decimals = 1) {
   if (!bytes) return '0 Bytes';
   const k = 1024;
@@ -26,12 +27,39 @@ function formatBytes(bytes: number, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Get file extension icon and styling
-function getFileIcon(mimeType: string) {
-  if (mimeType.startsWith('image/')) return <ImageIcon size={16} style={{ color: '#3b82f6' }} />;
-  if (mimeType.startsWith('video/')) return <Video size={16} style={{ color: '#f97316' }} />;
-  if (mimeType.startsWith('audio/')) return <Music size={16} style={{ color: '#8b5cf6' }} />;
-  return <FileText size={16} style={{ color: '#ef4444' }} />;
+// Get file extension color coding and label
+function getExtensionDetails(filename: string, mime: string) {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  if (mime.startsWith('image/')) {
+    if (ext === 'svg') return { bg: 'rgba(236, 72, 153, 0.15)', text: '#ec4899', border: 'rgba(236, 72, 153, 0.3)', label: 'SVG' };
+    return { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)', label: ext.toUpperCase() || 'IMG' };
+  }
+  if (mime.startsWith('video/')) return { bg: 'rgba(249, 115, 22, 0.15)', text: '#f97316', border: 'rgba(249, 115, 22, 0.3)', label: ext.toUpperCase() || 'MP4' };
+  if (mime.startsWith('audio/')) return { bg: 'rgba(139, 92, 246, 0.15)', text: '#8b5cf6', border: 'rgba(139, 92, 246, 0.3)', label: ext.toUpperCase() || 'AUDIO' };
+  if (mime === 'application/pdf') return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: 'rgba(239, 68, 68, 0.3)', label: 'PDF' };
+  if (mime.includes('spreadsheet') || mime === 'text/csv' || ext === 'xlsx' || ext === 'csv') {
+    return { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', border: 'rgba(16, 185, 129, 0.3)', label: ext.toUpperCase() || 'XLS' };
+  }
+  if (mime.includes('word') || ext === 'docx' || ext === 'doc') {
+    return { bg: 'rgba(37, 99, 235, 0.15)', text: '#2563eb', border: 'rgba(37, 99, 235, 0.3)', label: ext.toUpperCase() || 'DOC' };
+  }
+  return { bg: 'rgba(107, 114, 128, 0.15)', text: '#9ca3af', border: 'rgba(107, 114, 128, 0.3)', label: ext.toUpperCase() || 'FILE' };
+}
+
+// Generate colored initials avatar
+function getAvatarStyles(username: string) {
+  const cleanName = username.trim() || 'User';
+  const initials = cleanName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  const colors = [
+    { bg: '#fee2e2', text: '#ef4444' }, // Red
+    { bg: '#fef3c7', text: '#d97706' }, // Amber
+    { bg: '#d1fae5', text: '#059669' }, // Emerald
+    { bg: '#dbeafe', text: '#2563eb' }, // Blue
+    { bg: '#e0e7ff', text: '#4f46e5' }, // Indigo
+    { bg: '#f3e8ff', text: '#9333ea' }, // Purple
+  ];
+  const charCodeSum = cleanName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return { initials, ...colors[charCodeSum % colors.length] };
 }
 
 export default function ResourceModal({ conversationId, isOpen, onClose }: ResourceModalProps) {
@@ -232,13 +260,14 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
     <div style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(0, 0, 0, 0.5)',
-      backdropFilter: 'blur(5px)',
+      background: 'rgba(15, 23, 42, 0.45)',
+      backdropFilter: 'blur(8px)',
       zIndex: 9999,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '16px'
+      padding: '16px',
+      fontFamily: "'Outfit', 'Inter', sans-serif"
     }}>
       {/* Modal Container */}
       <motion.div
@@ -247,11 +276,11 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
         style={{
           width: '100%',
-          maxWidth: '680px',
-          background: 'var(--bg-secondary, #0f172a)',
-          border: '1px solid var(--border-default, #1e293b)',
-          borderRadius: 'var(--radius-xl, 16px)',
-          boxShadow: 'var(--shadow-2xl)',
+          maxWidth: '640px',
+          background: 'var(--surface-1, #1e293b)',
+          border: '1px solid var(--border-subtle, #334155)',
+          borderRadius: '16px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -261,12 +290,13 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
         {/* Header */}
         <div style={{
           padding: '16px 20px',
-          borderBottom: '1px solid var(--border-subtle, #1e293b)',
+          borderBottom: '1px solid var(--border-subtle, #334155)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          background: 'rgba(255,255,255,0.01)'
         }}>
-          <span style={{ fontWeight: 700, fontSize: '15.5px', color: 'var(--text-heading, #f8fafc)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text-primary, #f8fafc)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <FolderOpen size={18} style={{ color: '#6366f1' }} />
             Manage Chat Resources
           </span>
@@ -274,7 +304,7 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
             onClick={onClose}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text-muted, #94a3b8)', padding: 4, borderRadius: 4,
+              color: 'var(--text-muted, #64748b)', padding: 4, borderRadius: 4,
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}
           >
@@ -282,41 +312,45 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
           </button>
         </div>
 
-        {/* Tab Selection */}
+        {/* Tab Selection Row */}
         <div style={{
           display: 'flex',
-          borderBottom: '1px solid var(--border-subtle, #1e293b)',
-          background: 'rgba(30, 41, 59, 0.2)'
+          borderBottom: '1px solid var(--border-subtle, #334155)',
+          background: 'rgba(15, 23, 42, 0.15)',
+          padding: '4px 6px 0'
         }}>
           {[
             { id: 'browse', label: 'Browse Global Vault', icon: <FolderOpen size={13.5} /> },
             { id: 'upload', label: 'Upload Local File', icon: <Upload size={13.5} /> },
             { id: 'scrape', label: 'Scrape URL Reference', icon: <Globe size={13.5} /> }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              style={{
-                flex: 1,
-                padding: '12px 16px',
-                fontSize: '13px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === tab.id ? '2px solid #6366f1' : '2px solid transparent',
-                color: activeTab === tab.id ? '#f8fafc' : '#64748b',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                transition: 'all 0.15s'
-              }}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
+          ].map(tab => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: isActive ? '2.5px solid var(--accent-primary, #6366f1)' : '2.5px solid transparent',
+                  color: isActive ? 'var(--text-primary, #f8fafc)' : 'var(--text-muted, #64748b)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  transition: 'all 0.15s'
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Body content */}
@@ -324,7 +358,7 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
           
           {/* 1. BROWSE TAB */}
           {activeTab === 'browse' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               
               {/* Search Bar */}
               <div style={{ position: 'relative' }}>
@@ -336,8 +370,8 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
                   onChange={e => setSearchQuery(e.target.value)}
                   style={{
                     padding: '8px 10px 8px 30px',
-                    background: '#0f172a',
-                    border: '1px solid #334155',
+                    background: 'var(--bg-app, #0f172a)',
+                    border: '1px solid var(--border-subtle, #334155)',
                     borderRadius: '8px',
                     color: 'white',
                     fontSize: '12.5px',
@@ -351,60 +385,91 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
               <div style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 6,
-                maxHeight: '220px',
+                gap: 8,
+                maxHeight: '230px',
                 overflowY: 'auto',
                 paddingRight: 4
               }}>
                 {filteredFiles.map(file => {
                   const isChecked = selectedIds.includes(file.id);
+                  const extDetails = getExtensionDetails(file.filename, file.mime_type);
+                  const ownerAvatar = getAvatarStyles('Clever User');
+
                   return (
                     <div
                       key={file.id}
                       onClick={() => handleToggleSelect(file.id)}
                       style={{
                         padding: '10px 14px',
-                        borderRadius: '8px',
-                        border: isChecked ? '1.5px solid #6366f1' : '1px solid #1e293b',
-                        background: isChecked ? 'rgba(99, 102, 241, 0.05)' : 'rgba(30, 41, 59, 0.2)',
+                        borderRadius: '10px',
+                        border: isChecked ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-subtle, #334155)',
+                        background: isChecked ? 'rgba(99, 102, 241, 0.04)' : 'rgba(15, 23, 42, 0.15)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 12,
                         cursor: 'pointer',
                         transition: 'all 0.15s'
                       }}
+                      onMouseEnter={e => {
+                        if (!isChecked) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isChecked) e.currentTarget.style.borderColor = 'var(--border-subtle, #334155)';
+                      }}
                     >
-                      {/* Checkbox box */}
+                      {/* Checkbox */}
                       <div style={{
-                        width: 16, height: 16,
+                        width: 15, height: 15,
                         borderRadius: 4,
-                        border: isChecked ? 'none' : '1.5px solid #475569',
+                        border: isChecked ? 'none' : '1.5px solid #64748b',
                         background: isChecked ? '#6366f1' : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'white'
+                        color: 'white',
+                        flexShrink: 0
                       }}>
-                        {isChecked && <Check size={11} />}
+                        {isChecked && <Check size={10} />}
                       </div>
 
-                      {/* File Icon */}
-                      {getFileIcon(file.mime_type)}
+                      {/* Visual extension badge */}
+                      <div style={{
+                        width: 32, height: 32,
+                        borderRadius: '6px',
+                        background: extDetails.bg,
+                        color: extDetails.text,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '9px', fontWeight: 950,
+                        border: `1px solid ${extDetails.border}`,
+                        flexShrink: 0
+                      }}>
+                        {extDetails.label}
+                      </div>
 
-                      {/* Title / Description */}
+                      {/* Title & metadata info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary, #f8fafc)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {file.filename}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', gap: 8 }}>
+                        <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
                           <span>{formatBytes(file.size_bytes)}</span>
                           <span>•</span>
-                          <span>Folder: {file.folder_name || 'Root'}</span>
+                          <span style={{ color: '#94a3b8' }}>/{file.folder_name || 'General'}</span>
                           {file.token_count !== null && (
                             <>
                               <span>•</span>
-                              <span style={{ color: '#8b5cf6' }}>Tokens: {file.token_count.toLocaleString()}</span>
+                              <span style={{ color: '#8b5cf6' }}>{file.token_count.toLocaleString()} tokens</span>
                             </>
                           )}
                         </div>
+                      </div>
+
+                      {/* Small owner badge */}
+                      <div style={{
+                        width: 20, height: 20, borderRadius: '50%',
+                        background: ownerAvatar.bg, color: ownerAvatar.text,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '8px', fontWeight: 700, flexShrink: 0
+                      }}>
+                        {ownerAvatar.initials}
                       </div>
                     </div>
                   );
@@ -426,17 +491,20 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
               onDrop={onDropUpload}
               onClick={() => document.getElementById('modal-file-picker')?.click()}
               style={{
-                border: '2px dashed #334155',
+                border: '1.5px dashed var(--border-subtle, #334155)',
                 borderRadius: '12px',
-                padding: '44px 20px',
+                padding: '40px 20px',
                 textAlign: 'center',
                 cursor: 'pointer',
-                background: 'rgba(30, 41, 59, 0.1)',
+                background: 'rgba(15, 23, 42, 0.15)',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: 12
+                gap: 12,
+                transition: 'border-color 0.2s'
               }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-subtle, #334155)'}
             >
               <input
                 type="file"
@@ -445,19 +513,19 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
                 style={{ display: 'none' }}
               />
               <div style={{
-                width: 48, height: 48,
+                width: 44, height: 44,
                 borderRadius: '50%',
                 background: 'rgba(99, 102, 241, 0.1)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: '#6366f1'
               }}>
-                {isUploading ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
+                {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
               </div>
               <div>
-                <h4 style={{ fontSize: '14px', fontWeight: 650, margin: '0 0 4px', color: '#f1f5f9' }}>
+                <h4 style={{ fontSize: '13.5px', fontWeight: 655, margin: '0 0 3px', color: 'var(--text-primary, #f8fafc)' }}>
                   {isUploading ? 'Uploading file...' : 'Drop files here or click to browse'}
                 </h4>
-                <p style={{ fontSize: '11.5px', color: '#64748b', margin: 0 }}>
+                <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>
                   Supports PDFs, spreadsheets, Word files, text, images, and audio/video (Max 50MB)
                 </p>
               </div>
@@ -467,31 +535,31 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
           {/* 3. SCRAPE TAB */}
           {activeTab === 'scrape' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.4 }}>
                 Enter the direct link to a file. Our background agent will fetch the asset, validate its size, and run smart parsers.
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input
                   type="text"
                   placeholder="https://example.com/sheet.csv"
                   value={urlInput}
                   onChange={e => setUrlInput(e.target.value)}
                   style={{
-                    flex: 1,
                     padding: '8px 12px',
-                    background: '#0f172a',
-                    border: '1px solid #334155',
+                    background: 'var(--bg-app, #0f172a)',
+                    border: '1px solid var(--border-subtle, #334155)',
                     borderRadius: '8px',
                     color: 'white',
                     fontSize: '12.5px',
-                    outline: 'none'
+                    outline: 'none',
+                    width: '100%'
                   }}
                 />
                 <button
                   onClick={handleScrape}
                   disabled={isScraping || !urlInput.trim()}
                   style={{
-                    padding: '8px 16px',
+                    padding: '8px 14px',
                     background: isScraping || !urlInput.trim() ? '#1e293b' : '#6366f1',
                     color: isScraping || !urlInput.trim() ? '#64748b' : 'white',
                     borderRadius: '8px',
@@ -501,11 +569,12 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
                     cursor: isScraping || !urlInput.trim() ? 'default' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: 6
                   }}
                 >
                   {isScraping ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />}
-                  Scrape URL
+                  Scrape URL Link
                 </button>
               </div>
             </div>
@@ -517,8 +586,8 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
         {selectedIds.length > 0 && (
           <div style={{
             padding: '12px 20px',
-            background: 'rgba(30, 41, 59, 0.3)',
-            borderTop: '1px solid #1e293b',
+            background: 'rgba(15, 23, 42, 0.15)',
+            borderTop: '1px solid var(--border-subtle, #334155)',
             display: 'flex',
             flexDirection: 'column',
             gap: 10
@@ -526,7 +595,7 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
             {/* Impact indicator row */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8' }}>Token Impact:</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8' }}>Context Load:</span>
                 <span style={{
                   fontSize: '11.5px',
                   fontWeight: 700,
@@ -577,12 +646,13 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
               {selectedIds.map(id => {
                 const file = files.find(f => f.id === id);
                 if (!file) return null;
+                const extDetails = getExtensionDetails(file.filename, file.mime_type);
                 return (
                   <div
                     key={id}
                     style={{
-                      background: '#1e293b',
-                      border: '1px solid #334155',
+                      background: 'var(--bg-app, #0f172a)',
+                      border: '1px solid var(--border-subtle, #334155)',
                       padding: '2px 8px',
                       borderRadius: '12px',
                       fontSize: '11px',
@@ -592,7 +662,16 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
                       gap: 4
                     }}
                   >
-                    {getFileIcon(file.mime_type)}
+                    <div style={{
+                      padding: '1px 3px',
+                      background: extDetails.bg,
+                      color: extDetails.text,
+                      borderRadius: '3px',
+                      fontSize: '7px',
+                      fontWeight: 900
+                    }}>
+                      {extDetails.label}
+                    </div>
                     <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {file.filename}
                     </span>
@@ -617,8 +696,8 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
         {/* Footer controls */}
         <div style={{
           padding: '14px 20px',
-          borderTop: '1px solid var(--border-subtle, #1e293b)',
-          background: 'rgba(30, 41, 59, 0.15)',
+          borderTop: '1px solid var(--border-subtle, #334155)',
+          background: 'rgba(15, 23, 42, 0.25)',
           display: 'flex',
           justifyContent: 'flex-end',
           gap: 10
@@ -628,7 +707,7 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
             style={{
               padding: '8px 16px',
               background: 'transparent',
-              border: '1.5px solid #334155',
+              border: '1px solid var(--border-subtle, #334155)',
               borderRadius: '8px',
               color: '#cbd5e1',
               fontSize: '13px',
@@ -643,7 +722,7 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
             disabled={isSaving}
             style={{
               padding: '8px 20px',
-              background: '#6366f1',
+              background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
               border: 'none',
               borderRadius: '8px',
               color: 'white',
@@ -652,7 +731,8 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
               cursor: isSaving ? 'default' : 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 6
+              gap: 6,
+              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.3)'
             }}
           >
             {isSaving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}

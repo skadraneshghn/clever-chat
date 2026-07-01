@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Folder, FileText, Video, Image as ImageIcon, Music, Globe,
@@ -59,6 +59,14 @@ function getAvatarStyles(username: string) {
   return { initials, ...color };
 }
 
+// Default placeholder folders to display alongside real folders
+const PLACEHOLDER_FOLDERS = [
+  { name: 'Contracts & Legal', size: 1200000000, count: 24, organizedBy: 'AI Agent' },
+  { name: 'Invoices - Q1', size: 15000000, count: 3, organizedBy: 'System Default' },
+  { name: 'Invoices - Q2', size: 4000000, count: 12, organizedBy: 'System Default' },
+  { name: 'Design Systems', size: 2800000000, count: 45, organizedBy: 'AI Agent' },
+];
+
 export default function FileManagerPage() {
   const {
     files,
@@ -78,6 +86,7 @@ export default function FileManagerPage() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [activeFilterTab, setActiveFilterTab] = useState<'all' | 'documents' | 'spreadsheets' | 'pdfs' | 'images'>('all');
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [uploadQueue, setUploadQueue] = useState<Array<{
     id: string;
     filename: string;
@@ -89,26 +98,10 @@ export default function FileManagerPage() {
   const [dragActive, setDragActive] = useState(false);
   const [showUploadDropdown, setShowUploadDropdown] = useState(false);
   const [activeRowMenuId, setActiveRowMenuId] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const rowMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
-
-  // Click outside handlers
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowUploadDropdown(false);
-      }
-      if (rowMenuRef.current && !rowMenuRef.current.contains(event.target as Node)) {
-        setActiveRowMenuId(null);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // Aggregate files into smart virtual folders
   const foldersMap = files.reduce((acc: Record<string, { name: string; size: number; count: number; organizedBy: string }>, file) => {
@@ -126,15 +119,20 @@ export default function FileManagerPage() {
     return acc;
   }, {});
 
-  const folderList = Object.values(foldersMap);
+  const realFolders = Object.values(foldersMap);
 
-  // Fill in display folders (mimic 4 folder cards at top)
-  const displayFolders = folderList.length > 0 ? folderList : [
-    { name: 'Contracts & Legal', size: 1200000000, count: 24, organizedBy: 'AI Agent' },
-    { name: 'Invoices - Q1', size: 15000000, count: 3, organizedBy: 'System Default' },
-    { name: 'Invoices - Q2', size: 4000000, count: 12, organizedBy: 'System Default' },
-    { name: 'Design Systems', size: 2800000000, count: 45, organizedBy: 'AI Agent' },
-  ];
+  // Combine real folders and placeholder system folders (real folders override matching placeholders)
+  const displayFolders = [...realFolders];
+  PLACEHOLDER_FOLDERS.forEach(p => {
+    if (!displayFolders.some(f => f.name.toLowerCase() === p.name.toLowerCase())) {
+      displayFolders.push(p);
+    }
+  });
+
+  // Toggle selected folder helper
+  const toggleSelectedFolder = useCallback((folderName: string) => {
+    setSelectedFolder(prev => prev === folderName ? null : folderName);
+  }, []);
 
   // Drag overlay triggers
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -297,11 +295,11 @@ export default function FileManagerPage() {
   };
 
   // Sort files by creation date for Recent section
-  const sortedFiles = [...files].sort((a, b) => {
+  const sortedFilesForRecent = [...files].sort((a, b) => {
     return new Date(b.created_at || b.id).getTime() - new Date(a.created_at || a.id).getTime();
   });
 
-  const recentFiles = sortedFiles.slice(0, 8);
+  const recentFiles = sortedFilesForRecent.slice(0, 8);
 
   // Filter files based on filter tab and search
   const filteredFiles = files.filter(f => {
@@ -328,6 +326,13 @@ export default function FileManagerPage() {
     return matchesSearch && matchesFolder && matchesTab;
   });
 
+  // Sort filtered files for the main table
+  const sortedFilteredFiles = [...filteredFiles].sort((a, b) => {
+    const dateA = new Date(a.created_at || a.id).getTime();
+    const dateB = new Date(b.created_at || b.id).getTime();
+    return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+  });
+
   // Handle table row checkbox toggling
   const handleSelectRow = (id: string) => {
     setSelectedFileIds(prev =>
@@ -336,10 +341,10 @@ export default function FileManagerPage() {
   };
 
   const handleSelectAll = () => {
-    if (selectedFileIds.length === filteredFiles.length) {
+    if (selectedFileIds.length === sortedFilteredFiles.length) {
       setSelectedFileIds([]);
     } else {
-      setSelectedFileIds(filteredFiles.map(f => f.id));
+      setSelectedFileIds(sortedFilteredFiles.map(f => f.id));
     }
   };
 
@@ -421,11 +426,46 @@ export default function FileManagerPage() {
           flexWrap: 'wrap',
           gap: 16
         }}>
-          {/* Path breadcrumbs */}
+          {/* Path breadcrumbs with clear folder mechanism */}
           <div style={{ fontSize: '13.5px', fontWeight: 500, color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>Dashboard</span>
+            <span style={{ cursor: 'pointer' }} onClick={() => setSelectedFolder(null)}>Dashboard</span>
             <span style={{ opacity: 0.5 }}>/</span>
-            <span style={{ color: 'var(--text-primary, #f8fafc)', fontWeight: 600 }}>Project Files</span>
+            <span 
+              onClick={() => setSelectedFolder(null)}
+              style={{ 
+                color: selectedFolder ? 'var(--text-muted, #64748b)' : 'var(--text-primary, #f8fafc)', 
+                fontWeight: selectedFolder ? 500 : 600,
+                cursor: selectedFolder ? 'pointer' : 'default',
+                textDecoration: selectedFolder ? 'underline' : 'none'
+              }}
+            >
+              Project Files
+            </span>
+            {selectedFolder && (
+              <>
+                <span style={{ opacity: 0.5 }}>/</span>
+                <span style={{ color: 'var(--text-primary, #f8fafc)', fontWeight: 600 }}>{selectedFolder}</span>
+                <button 
+                  onClick={() => setSelectedFolder(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#ef4444',
+                    fontSize: '11px',
+                    marginLeft: '8px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.08)'
+                  }}
+                >
+                  <X size={10} /> Clear Filter
+                </button>
+              </>
+            )}
           </div>
 
           {/* Quick tools */}
@@ -470,7 +510,7 @@ export default function FileManagerPage() {
           </div>
         </div>
 
-        {/* Title and Upload action Row */}
+        {/* Title and Actions Row */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -486,8 +526,41 @@ export default function FileManagerPage() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }} ref={dropdownRef}>
-            {/* Upload Button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
+            {/* Bulk delete action when rows are selected */}
+            {selectedFileIds.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (confirm(`Are you sure you want to delete ${selectedFileIds.length} selected files?`)) {
+                    const deletePromises = selectedFileIds.map(id => deleteFile(id));
+                    await Promise.all(deletePromises);
+                    setSelectedFileIds([]);
+                    fetchFiles();
+                  }
+                }}
+                style={{
+                  background: '#ef4444',
+                  color: 'white',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'opacity 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Trash2 size={14} />
+                Delete Selected ({selectedFileIds.length})
+              </button>
+            )}
+
+            {/* Upload Dropdown Controls */}
             <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden' }}>
               <button
                 onClick={() => document.getElementById('local-file-picker')?.click()}
@@ -531,72 +604,83 @@ export default function FileManagerPage() {
             {/* Dropdown Options overlay */}
             <AnimatePresence>
               {showUploadDropdown && (
-                <motion.div
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 5 }}
-                  style={{
-                    position: 'absolute',
-                    top: '40px',
-                    right: 0,
-                    zIndex: 50,
-                    width: '180px',
-                    background: 'var(--surface-1, #1e293b)',
-                    border: '1px solid var(--border-subtle, #334155)',
-                    borderRadius: '8px',
-                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
-                    padding: '6px'
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      document.getElementById('local-file-picker')?.click();
-                      setShowUploadDropdown(false);
-                    }}
+                <>
+                  <div 
+                    onClick={() => setShowUploadDropdown(false)}
                     style={{
-                      width: '100%',
-                      padding: '8px 10px',
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-primary, #f8fafc)',
-                      fontSize: '12.5px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      borderRadius: '6px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 49,
+                      background: 'transparent'
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                  >
-                    <Upload size={13} /> Local Upload
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowScrapeModal(true);
-                      setShowUploadDropdown(false);
-                    }}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
                     style={{
-                      width: '100%',
-                      padding: '8px 10px',
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-primary, #f8fafc)',
-                      fontSize: '12.5px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      borderRadius: '6px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8
+                      position: 'absolute',
+                      top: '40px',
+                      right: 0,
+                      zIndex: 50,
+                      width: '180px',
+                      background: 'var(--surface-1, #1e293b)',
+                      border: '1px solid var(--border-subtle, #334155)',
+                      borderRadius: '8px',
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
+                      padding: '6px'
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
                   >
-                    <Globe size={13} /> Scrape URL Link
-                  </button>
-                </motion.div>
+                    <button
+                      onClick={() => {
+                        document.getElementById('local-file-picker')?.click();
+                        setShowUploadDropdown(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary, #f8fafc)',
+                        fontSize: '12.5px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Upload size={13} /> Local Upload
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowScrapeModal(true);
+                        setShowUploadDropdown(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary, #f8fafc)',
+                        fontSize: '12.5px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Globe size={13} /> Scrape URL Link
+                    </button>
+                  </motion.div>
+                </>
               )}
             </AnimatePresence>
 
@@ -610,7 +694,7 @@ export default function FileManagerPage() {
           </div>
         </div>
 
-        {/* Smart Folder cards grid (Row of 4 folders) */}
+        {/* Smart Folder cards grid (Row of folders, real and placeholder system folders) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2 style={{ fontSize: '14.5px', fontWeight: 650, color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
             Smart Folder Index
@@ -626,7 +710,7 @@ export default function FileManagerPage() {
               return (
                 <div
                   key={folder.name}
-                  onClick={() => setSelectedFolder(isSelected ? null : folder.name)}
+                  onClick={() => toggleSelectedFolder(folder.name)}
                   style={{
                     background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--surface-1, #1e293b)',
                     border: isSelected ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-subtle, #334155)',
@@ -703,7 +787,7 @@ export default function FileManagerPage() {
             }}>
               {recentFiles.map(file => {
                 const extDetails = getExtensionDetails(file.filename, file.mime_type);
-                const relativeDate = file.created_at ? new Date(file.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Jan, 20 2026';
+                const relativeDate = file.created_at ? new Date(file.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Jan 20, 2026';
                 return (
                   <div
                     key={file.id}
@@ -866,7 +950,7 @@ export default function FileManagerPage() {
                     <th style={{ padding: '12px 16px', width: '40px' }}>
                       <input
                         type="checkbox"
-                        checked={filteredFiles.length > 0 && selectedFileIds.length === filteredFiles.length}
+                        checked={sortedFilteredFiles.length > 0 && selectedFileIds.length === sortedFilteredFiles.length}
                         onChange={handleSelectAll}
                         style={{ cursor: 'pointer', width: 14, height: 14 }}
                       />
@@ -874,8 +958,11 @@ export default function FileManagerPage() {
                     <th style={{ padding: '12px 16px', fontSize: '11.5px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
                       Filename
                     </th>
-                    <th style={{ padding: '12px 16px', fontSize: '11.5px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
-                      Created At
+                    <th 
+                      onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                      style={{ padding: '12px 16px', fontSize: '11.5px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}
+                    >
+                      Created At <span style={{ marginLeft: 4 }}>{sortOrder === 'desc' ? '↓' : '↑'}</span>
                     </th>
                     <th style={{ padding: '12px 16px', fontSize: '11.5px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
                       Owner
@@ -887,7 +974,7 @@ export default function FileManagerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredFiles.map(file => {
+                  {sortedFilteredFiles.map(file => {
                     const extDetails = getExtensionDetails(file.filename, file.mime_type);
                     const fileDate = file.created_at
                       ? new Date(file.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -969,7 +1056,7 @@ export default function FileManagerPage() {
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <span
-                            onClick={() => setSelectedFolder(file.folder_name || 'General')}
+                            onClick={() => toggleSelectedFolder(file.folder_name || 'General')}
                             style={{
                               fontSize: '12px',
                               fontWeight: 500,
@@ -989,58 +1076,72 @@ export default function FileManagerPage() {
                             <MoreHorizontal size={14} />
                           </button>
 
-                          {/* Options overlay popup */}
+                          {/* Options overlay popup using standard transparent backdrop pattern */}
                           <AnimatePresence>
                             {activeRowMenuId === file.id && (
-                              <div
-                                ref={rowMenuRef}
-                                style={{
-                                  position: 'absolute',
-                                  right: '16px',
-                                  top: '32px',
-                                  zIndex: 40,
-                                  background: 'var(--surface-1, #1e293b)',
-                                  border: '1px solid var(--border-subtle, #334155)',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                  padding: '4px',
-                                  width: '120px'
-                                }}
-                              >
-                                <a
-                                  href={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.url}`}
-                                  download={file.filename}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                    padding: '6px 8px', borderRadius: '4px', fontSize: '12px',
-                                    color: 'var(--text-primary, #f8fafc)', textDecoration: 'none'
-                                  }}
-                                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                                >
-                                  <Download size={12} /> Download
-                                </a>
-                                <button
-                                  onClick={() => {
-                                    if (confirm(`Delete "${file.filename}"?`)) {
-                                      deleteFile(file.id);
-                                    }
+                              <>
+                                <div 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setActiveRowMenuId(null);
                                   }}
                                   style={{
-                                    display: 'flex', alignItems: 'center', gap: 6,
-                                    padding: '6px 8px', borderRadius: '4px', fontSize: '12px',
-                                    color: '#ef4444', background: 'none', border: 'none',
-                                    width: '100%', textAlign: 'left', cursor: 'pointer'
+                                    position: 'fixed',
+                                    inset: 0,
+                                    zIndex: 39,
+                                    background: 'transparent',
+                                    cursor: 'default'
                                   }}
-                                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                />
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    right: '16px',
+                                    top: '32px',
+                                    zIndex: 40,
+                                    background: 'var(--surface-1, #1e293b)',
+                                    border: '1px solid var(--border-subtle, #334155)',
+                                    borderRadius: '8px',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                    padding: '4px',
+                                    width: '120px'
+                                  }}
                                 >
-                                  <Trash2 size={12} /> Delete
-                                </button>
-                              </div>
+                                  <a
+                                    href={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.url}`}
+                                    download={file.filename}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      padding: '6px 8px', borderRadius: '4px', fontSize: '12px',
+                                      color: 'var(--text-primary, #f8fafc)', textDecoration: 'none'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                  >
+                                    <Download size={12} /> Download
+                                  </a>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Delete "${file.filename}"?`)) {
+                                        deleteFile(file.id);
+                                      }
+                                      setActiveRowMenuId(null);
+                                    }}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: 6,
+                                      padding: '6px 8px', borderRadius: '4px', fontSize: '12px',
+                                      color: '#ef4444', background: 'none', border: 'none',
+                                      width: '100%', textAlign: 'left', cursor: 'pointer'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                  >
+                                    <Trash2 size={12} /> Delete
+                                  </button>
+                                </div>
+                              </>
                             )}
                           </AnimatePresence>
                         </td>
@@ -1048,7 +1149,7 @@ export default function FileManagerPage() {
                     );
                   })}
 
-                  {filteredFiles.length === 0 && (
+                  {sortedFilteredFiles.length === 0 && (
                     <tr>
                       <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
                         {searchQuery ? 'No files match your search filter.' : 'This folder contains no files yet.'}
@@ -1072,7 +1173,7 @@ export default function FileManagerPage() {
               gap: 12
             }}>
               <span>
-                {selectedFileIds.length} of {filteredFiles.length} row(s) selected.
+                {selectedFileIds.length} of {sortedFilteredFiles.length} row(s) selected.
               </span>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1103,31 +1204,35 @@ export default function FileManagerPage() {
         gap: '24px',
         flexShrink: 0
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'space-between' }}>
           <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0 }}>Files</h2>
           <button style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>
             <MoreHorizontal size={14} />
           </button>
         </div>
 
-        {/* Right toolbar controls */}
+        {/* Right toolbar controls (Bound to activeFilterTab) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <select style={{
-            flex: 1,
-            padding: '6px 8px',
-            background: 'var(--bg-app, #0f172a)',
-            border: '1px solid var(--border-subtle, #334155)',
-            borderRadius: '6px',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '12px',
-            outline: 'none',
-            cursor: 'pointer'
-          }}>
-            <option>All Types</option>
-            <option>Documents</option>
-            <option>Spreadsheets</option>
-            <option>PDFs</option>
-            <option>Images</option>
+          <select 
+            value={activeFilterTab}
+            onChange={e => setActiveFilterTab(e.target.value as any)}
+            style={{
+              flex: 1,
+              padding: '6px 8px',
+              background: 'var(--bg-app, #0f172a)',
+              border: '1px solid var(--border-subtle, #334155)',
+              borderRadius: '6px',
+              color: 'var(--text-primary, #f8fafc)',
+              fontSize: '12px',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="all">All Types</option>
+            <option value="documents">Documents</option>
+            <option value="spreadsheets">Spreadsheets</option>
+            <option value="pdfs">PDFs</option>
+            <option value="images">Images</option>
           </select>
 
           <button style={{
@@ -1155,33 +1260,40 @@ export default function FileManagerPage() {
 
         {/* Miniature Folder Stack */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {displayFolders.slice(0, 3).map((folder, index) => (
-            <div
-              key={folder.name}
-              onClick={() => setSelectedFolder(folder.name)}
-              style={{
-                background: 'var(--bg-app, #0f172a)',
-                border: '1px solid var(--border-subtle, #334155)',
-                borderRadius: '8px',
-                padding: '10px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer',
-                transition: 'border-color 0.15s'
-              }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-subtle, #334155)'}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Folder size={14} style={{ color: '#f97316' }} />
-                <span style={{ fontSize: '12px', fontWeight: 600 }}>{folder.name}</span>
+          {displayFolders.slice(0, 3).map((folder) => {
+            const isSelected = selectedFolder === folder.name;
+            return (
+              <div
+                key={folder.name}
+                onClick={() => toggleSelectedFolder(folder.name)}
+                style={{
+                  background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-app, #0f172a)',
+                  border: isSelected ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-subtle, #334155)',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s'
+                }}
+                onMouseEnter={e => {
+                  if (!isSelected) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                }}
+                onMouseLeave={e => {
+                  if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-subtle, #334155)';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Folder size={14} style={{ color: '#f97316' }} />
+                  <span style={{ fontSize: '12px', fontWeight: 600 }}>{folder.name}</span>
+                </div>
+                <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                  {folder.count} files
+                </span>
               </div>
-              <span style={{ fontSize: '10.5px', color: '#64748b' }}>
-                {folder.count} files
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* mini Recent Files detailed card stack */}
