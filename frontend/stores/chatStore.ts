@@ -231,6 +231,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeNodes: [],
       isNewChatMode: true,
       imageGenerationMode: false, // reset on new chat
+      activeChatResourceIds: [], // Clear resource attachments for the chat
     });
   },
 

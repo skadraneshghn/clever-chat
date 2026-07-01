@@ -108,9 +108,11 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
 
   // Sync state and fetch data on open
   useEffect(() => {
-    if (isOpen && effectiveConversationId) {
+    if (isOpen) {
       fetchFiles();
-      fetchActiveChatResources(effectiveConversationId);
+      if (effectiveConversationId) {
+        fetchActiveChatResources(effectiveConversationId);
+      }
     }
   }, [isOpen, effectiveConversationId, fetchFiles, fetchActiveChatResources]);
 
@@ -227,7 +229,12 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
 
   // Save selection (syncing join table bindings)
   const handleSave = async () => {
-    if (!effectiveConversationId) return;
+    if (!effectiveConversationId) {
+      useChatStore.setState({ activeChatResourceIds: selectedIds });
+      toast.success('Attached resources saved locally');
+      onClose();
+      return;
+    }
     setIsSaving(true);
     const syncId = toast.loading('Syncing conversation resources...');
     try {

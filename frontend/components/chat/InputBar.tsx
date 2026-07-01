@@ -176,22 +176,15 @@ export default function InputBar({ conversationId }: InputBarProps) {
     if (effectiveConversationId) {
       fetchActiveChatResources(effectiveConversationId);
       fetchFiles();
+    } else {
+      useChatStore.setState({ activeChatResourceIds: [] });
     }
   }, [effectiveConversationId, fetchActiveChatResources, fetchFiles]);
 
   const attachedResources = files.filter((f) => activeChatResourceIds.includes(f.id));
 
-  const handleAttachClick = async () => {
-    if (!effectiveConversationId) {
-      try {
-        await createConversation('New Chat');
-        setTimeout(() => setResourceModalOpen(true), 50);
-      } catch {
-        toast.error('Failed to start a new chat session for attachments');
-      }
-    } else {
-      setResourceModalOpen(true);
-    }
+  const handleAttachClick = () => {
+    setResourceModalOpen(true);
   };
 
   const activeConv = conversations.find(c => c.id === effectiveConversationId);
@@ -493,7 +486,18 @@ export default function InputBar({ conversationId }: InputBarProps) {
 
                     {/* Detach button */}
                     <button
-                    onClick={() => effectiveConversationId && detachResourceFromChat(effectiveConversationId, file.id)}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (effectiveConversationId) {
+                          detachResourceFromChat(effectiveConversationId, file.id);
+                        } else {
+                          useChatStore.setState((state) => ({
+                            activeChatResourceIds: state.activeChatResourceIds.filter((cid) => cid !== file.id)
+                          }));
+                        }
+                      }}
                       style={{
                         position: 'absolute',
                         top: -6, right: -6,
@@ -587,7 +591,12 @@ export default function InputBar({ conversationId }: InputBarProps) {
                   )}
 
                   <button
-                    onClick={() => removeAttachment(att.clientId)}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeAttachment(att.clientId);
+                    }}
                     style={{
                       position: 'absolute',
                       top: -6, right: -6,
