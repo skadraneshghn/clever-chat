@@ -68,6 +68,7 @@ const PLACEHOLDER_FOLDERS = [
 ];
 
 export default function FileManagerPage() {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '';
   const {
     files,
     fetchFiles,
@@ -1108,7 +1109,7 @@ export default function FileManagerPage() {
                                   }}
                                 >
                                   <a
-                                    href={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.url}`}
+                                    href={`${process.env.NEXT_PUBLIC_API_URL || ''}${file.url}?token=${token}`}
                                     download={file.filename}
                                     target="_blank"
                                     rel="noreferrer"
