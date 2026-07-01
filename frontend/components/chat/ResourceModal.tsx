@@ -41,7 +41,8 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
     activeChatResourceIds,
     fetchActiveChatResources,
     attachResourcesToChat,
-    detachResourceFromChat
+    detachResourceFromChat,
+    checkHash
   } = useChatStore();
 
   const [activeTab, setActiveTab] = useState<'browse' | 'upload' | 'scrape'>('browse');
@@ -77,45 +78,76 @@ export default function ResourceModal({ conversationId, isOpen, onClose }: Resou
     });
   };
 
+  // Helper to hash and upload file
+  const processAndUploadFile = async (file: File) => {
+    setIsUploading(true);
+    const loaderId = toast.loading('Computing hash & checking duplicates...');
+    
+    // Spawn Web Worker for off-thread hashing
+    const worker = new Worker(new URL('@/workers/hashWorker.ts', import.meta.url));
+    worker.postMessage({ file });
+
+    worker.onmessage = async (e) => {
+      const { success, hash, error } = e.data;
+      if (!success) {
+        toast.error(`Hashing failed: ${error}`, { id: loaderId });
+        setIsUploading(false);
+        worker.terminate();
+        return;
+      }
+
+      try {
+        // Pre-flight check
+        toast.loading('Checking vault for duplicate assets...', { id: loaderId });
+        const preFlight = await checkHash(hash, file.name, file.type);
+        if (preFlight.exists) {
+          toast.success(`Duplicate found. Instantly restored "${file.name}" from vault.`, { id: loaderId });
+          await fetchFiles();
+          setSelectedIds(prev => {
+            const list = new Set(prev);
+            list.add(preFlight.asset.id);
+            return Array.from(list);
+          });
+          setActiveTab('browse');
+          worker.terminate();
+          setIsUploading(false);
+          return;
+        }
+
+        // Full upload
+        toast.loading('Uploading asset to S3 Cloud Vault...', { id: loaderId });
+        const res = await api.uploadMedia(file);
+        toast.success(`Successfully uploaded "${file.name}"`, { id: loaderId });
+        await fetchFiles();
+        setSelectedIds(prev => [...prev, res.id]);
+        setActiveTab('browse');
+      } catch (err) {
+        toast.error('Failed to save file reference', { id: loaderId });
+      } finally {
+        setIsUploading(false);
+        worker.terminate();
+      }
+    };
+
+    worker.onerror = (err) => {
+      console.error(err);
+      toast.error('Worker thread error while hashing.', { id: loaderId });
+      setIsUploading(false);
+      worker.terminate();
+    };
+  };
+
   // Dropzone upload logic
   const onDropUpload = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setIsUploading(true);
-      const loaderId = toast.loading('Uploading file...');
-      try {
-        const file = e.dataTransfer.files[0];
-        const res = await api.uploadMedia(file);
-        toast.success(`Successfully uploaded "${file.name}"`, { id: loaderId });
-        await fetchFiles();
-        // Auto select newly uploaded file
-        setSelectedIds(prev => [...prev, res.id]);
-        setActiveTab('browse');
-      } catch (err) {
-        toast.error('Failed to upload file', { id: loaderId });
-      } finally {
-        setIsUploading(false);
-      }
+      await processAndUploadFile(e.dataTransfer.files[0]);
     }
-  }, [fetchFiles]);
+  }, [fetchFiles, checkHash]);
 
   const onFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setIsUploading(true);
-      const loaderId = toast.loading('Uploading file...');
-      try {
-        const file = e.target.files[0];
-        const res = await api.uploadMedia(file);
-        toast.success(`Successfully uploaded "${file.name}"`, { id: loaderId });
-        await fetchFiles();
-        // Auto select newly uploaded file
-        setSelectedIds(prev => [...prev, res.id]);
-        setActiveTab('browse');
-      } catch (err) {
-        toast.error('Failed to upload file', { id: loaderId });
-      } finally {
-        setIsUploading(false);
-      }
+      await processAndUploadFile(e.target.files[0]);
     }
   };
 

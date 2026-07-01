@@ -13,6 +13,7 @@ import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/pris
 import {
   FiCopy, FiCheck, FiRefreshCw, FiEdit3, FiThumbsUp,
   FiThumbsDown, FiShare2, FiMoreHorizontal, FiEye, FiEyeOff,
+  FiFileText, FiMusic, FiVideo, FiDownload,
 } from 'react-icons/fi';
 import { RiRobot2Line, RiUser3Line } from 'react-icons/ri';
 import { messageAppear } from '@/lib/motion';
@@ -58,6 +59,11 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
   // Extract image blocks for rendering
   const imageBlocks = message.content.filter(
     (b: ContentBlock) => b.type === 'image_url' || b.type === 'image'
+  );
+
+  // Extract non-image media files for rendering
+  const mediaBlocks = message.content.filter(
+    (b: ContentBlock) => b.type === 'document' || b.type === 'audio'
   );
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -205,6 +211,104 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         />
                       </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Attached documents, audio, or video files */}
+              {mediaBlocks.length > 0 && (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  marginBottom: displayContent ? 12 : 0,
+                  maxWidth: 500,
+                }}>
+                  {mediaBlocks.map((block, i) => {
+                    const fileUrl = block.asset_id
+                      ? `/api/v1/media/${block.asset_id}${tokenSuffix}`
+                      : block.url;
+                    
+                    const isAudio = block.type === 'audio' || !!block.mime_type?.startsWith('audio/');
+                    const isVideo = !!block.mime_type?.startsWith('video/');
+
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          background: 'rgba(30, 41, 59, 0.45)',
+                          border: '1px solid var(--border-subtle, #334155)',
+                          borderRadius: 'var(--radius-lg, 12px)',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          transition: 'border-color var(--transition-fast)'
+                        }}
+                      >
+                        {/* Icon Container */}
+                        <div style={{
+                          width: 40, height: 40,
+                          borderRadius: 'var(--radius-md, 8px)',
+                          background: isAudio ? 'rgba(139, 92, 246, 0.15)' : (isVideo ? 'rgba(249, 115, 22, 0.15)' : 'rgba(99, 102, 241, 0.15)'),
+                          color: isAudio ? '#8b5cf6' : (isVideo ? '#f97316' : '#6366f1'),
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 18,
+                          flexShrink: 0
+                        }}>
+                          {isAudio ? <FiMusic /> : (isVideo ? <FiVideo /> : <FiFileText />)}
+                        </div>
+
+                        {/* Title & Metadata */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            color: '#f8fafc',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            display: 'block'
+                          }}>
+                            {block.filename || 'Attached Asset'}
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
+                            {block.mime_type && <span>{block.mime_type.split('/').pop()?.toUpperCase()}</span>}
+                            {block.duration_ms && (
+                              <>
+                                <span>•</span>
+                                <span>{Math.round(block.duration_ms / 1000)}s</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        {fileUrl && (
+                          <a
+                            href={`${process.env.NEXT_PUBLIC_API_URL || ''}${fileUrl}`}
+                            download={block.filename || 'download'}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                              width: 32, height: 32,
+                              borderRadius: '50%',
+                              background: '#1e293b',
+                              color: '#cbd5e1',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              cursor: 'pointer',
+                              border: '1px solid var(--border-subtle, #334155)',
+                              transition: 'all 0.15s'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#334155'; e.currentTarget.style.color = '#fff'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = '#1e293b'; e.currentTarget.style.color = '#cbd5e1'; }}
+                            title="Download/Open attachment"
+                          >
+                            <FiDownload size={13} />
+                          </a>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

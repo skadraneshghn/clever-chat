@@ -71,6 +71,7 @@ interface ChatState {
   fetchActiveChatResources: (convId: string) => Promise<void>;
   attachResourcesToChat: (convId: string, ids: string[]) => Promise<void>;
   detachResourceFromChat: (convId: string, id: string) => Promise<void>;
+  checkHash: (hash: string, filename: string, mimeType: string) => Promise<any>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -317,15 +318,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   deleteFile: async (id) => {
+    const originalFiles = get().files;
+    const originalResourceIds = get().activeChatResourceIds;
+
+    // Optimistic Update
+    set((state) => ({
+      files: state.files.filter((f) => f.id !== id),
+      activeChatResourceIds: state.activeChatResourceIds.filter((cid) => cid !== id),
+    }));
+
     try {
       await api.delete(`/media/${id}`);
-      set((state) => ({
-        files: state.files.filter((f) => f.id !== id),
-        activeChatResourceIds: state.activeChatResourceIds.filter((cid) => cid !== id),
-      }));
+      toast.success('File deleted successfully');
     } catch (err) {
       console.error('Failed to delete file:', err);
-      toast.error('Failed to delete file');
+      toast.error('Failed to delete file. Rolling back.');
+      // Rollback on failure
+      set({
+        files: originalFiles,
+        activeChatResourceIds: originalResourceIds,
+      });
+    }
+  },
+
+  checkHash: async (hash, filename, mimeType) => {
+    try {
+      const result = await api.post<any>('/media/check-hash', {
+        file_hash: hash,
+        filename: filename,
+        mime_type: mimeType,
+      });
+      if (result.exists) {
+        set((state) => {
+          const existsInList = state.files.some(f => f.id === result.asset.id);
+          const updatedFiles = existsInList ? state.files : [result.asset, ...state.files];
+          return { files: updatedFiles };
+        });
+      }
+      return result;
+    } catch (err) {
+      console.error('Failed pre-flight hash check:', err);
+      return { exists: false };
     }
   },
 

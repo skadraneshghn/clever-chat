@@ -10,17 +10,22 @@ from __future__ import annotations
 import io
 import json
 import uuid
+import hashlib
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, BackgroundTasks, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, Response
 from fastapi.responses import FileResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from PIL import Image
+from arq import create_pool
+from arq.connections import RedisSettings
 
 from app.core.config import get_settings
 from app.core.database import get_db, get_db_context
@@ -29,6 +34,7 @@ from app.models.media_asset import MediaAsset
 from app.models.chat_resource import ChatResource
 from app.services.s3_storage import (
     upload_bytes_to_s3,
+    upload_file_to_s3,
     download_bytes_from_s3,
     delete_file_from_s3,
 )
@@ -67,36 +73,25 @@ class AttachResourcesRequest(BaseModel):
     media_asset_ids: list[uuid.UUID]
 
 
+class CheckHashRequest(BaseModel):
+    file_hash: str
+    filename: str
+    mime_type: str
+
+
 # ── Background Extraction Worker Helper ──────────────────────────────────────
 
-async def background_extract_task(asset_id: uuid.UUID, content: bytes, mime_type: str):
-    """Background task to extract document text, calculate token counts, and save to DB."""
-    async with get_db_context() as db:
-        try:
-            logger.info("background_extraction_start", asset_id=str(asset_id), mime=mime_type)
-            
-            # Execute parsing/extraction
-            extracted_text = process_document_content(content, mime_type)
-            token_count = count_tokens(extracted_text)
-            
-            # Update asset record
-            result = await db.execute(select(MediaAsset).where(MediaAsset.id == asset_id))
-            asset = result.scalar_one_or_none()
-            if asset:
-                asset.extracted_text = extracted_text
-                asset.token_count = token_count
-                asset.extraction_status = "success" if extracted_text else "none"
-                asset.status = "completed"
-                await db.commit()
-                logger.info("background_extraction_completed", asset_id=str(asset_id), tokens=token_count)
-        except Exception as e:
-            logger.error("background_extraction_failed", asset_id=str(asset_id), error=str(e))
-            result = await db.execute(select(MediaAsset).where(MediaAsset.id == asset_id))
-            asset = result.scalar_one_or_none()
-            if asset:
-                asset.extraction_status = "failed"
-                asset.status = "failed"
-                await db.commit()
+async def get_arq_redis():
+    """Retrieve a connection pool for the arq Redis backend job worker."""
+    settings = get_settings()
+    parsed_redis = urlparse(settings.redis_url)
+    redis_settings = RedisSettings(
+        host=parsed_redis.hostname or "localhost",
+        port=parsed_redis.port or 6379,
+        password=parsed_redis.password,
+        database=int(parsed_redis.path.lstrip("/")) if parsed_redis.path else 0
+    )
+    return await create_pool(redis_settings)
 
 
 # ── Router Endpoints ─────────────────────────────────────────────────────────
@@ -134,14 +129,49 @@ async def list_media(
     ]
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
-async def upload_media(
-    file: UploadFile,
-    background_tasks: BackgroundTasks,
+@router.post("/check-hash", status_code=status.HTTP_200_OK)
+async def check_file_hash(
+    body: CheckHashRequest,
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a media file with SHA-256 stream deduplication and S3/Cellar storage."""
+    """Check if a file with the given SHA-256 hash already exists for this user."""
+    result = await db.execute(
+        select(MediaAsset).where(
+            MediaAsset.user_id == user.id,
+            MediaAsset.file_hash == body.file_hash
+        )
+    )
+    duplicate = result.scalar_one_or_none()
+    if duplicate:
+        logger.info("hash_check_duplicate_found", hash=body.file_hash, filename=body.filename)
+        return {
+            "exists": True,
+            "asset": {
+                "id": str(duplicate.id),
+                "filename": duplicate.original_filename,
+                "mime_type": duplicate.mime_type,
+                "size_bytes": duplicate.size_bytes,
+                "width": duplicate.width,
+                "height": duplicate.height,
+                "folder_name": duplicate.folder_name,
+                "status": duplicate.status,
+                "extraction_status": duplicate.extraction_status,
+                "token_count": duplicate.token_count,
+                "url": f"/api/v1/media/{duplicate.id}",
+                "thumbnail_url": f"/api/v1/media/{duplicate.id}/thumbnail" if duplicate.mime_type.startswith("image/") else None,
+            }
+        }
+    return {"exists": False}
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_media(
+    file: UploadFile,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a media file using chunked streaming disk buffers, incremental SHA-256, and S3 thread pool execution."""
     settings = get_settings()
 
     # Validate MIME type
@@ -151,18 +181,41 @@ async def upload_media(
             detail=f"Unsupported file type: {file.content_type}. Allowed: {', '.join(sorted(ALLOWED_MIME_TYPES))}",
         )
 
-    # Read content
-    content = await file.read()
-    if len(content) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Max size: {settings.MAX_UPLOAD_SIZE_MB}MB",
-        )
+    # 1. Create temp file directory
+    temp_dir = Path("app/temp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_file_path = temp_dir / f"{uuid.uuid4()}.tmp"
 
-    # Calculate SHA-256 hash for deduplication
-    file_hash = compute_sha256(content)
+    sha256 = hashlib.sha256()
+    size = 0
 
-    # Deduplication check: check if user has uploaded the same file hash
+    try:
+        # Stream file upload in 1MB chunks to disk
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > settings.max_upload_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Max size: {settings.MAX_UPLOAD_SIZE_MB}MB",
+                )
+            sha256.update(chunk)
+            # Write chunk to temp file
+            with open(temp_file_path, "ab") as f:
+                f.write(chunk)
+        
+        file_hash = sha256.hexdigest()
+
+    except Exception as e:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"File streaming failed: {str(e)}")
+
+    # 2. Check for duplicate hash
     dup_result = await db.execute(
         select(MediaAsset).where(
             MediaAsset.user_id == user.id,
@@ -172,6 +225,9 @@ async def upload_media(
     duplicate = dup_result.scalar_one_or_none()
     if duplicate:
         logger.info("upload_deduplicated", asset_id=str(duplicate.id), filename=file.filename)
+        # Clean up temp file
+        if temp_file_path.exists():
+            temp_file_path.unlink()
         return {
             "id": str(duplicate.id),
             "filename": duplicate.original_filename,
@@ -188,36 +244,46 @@ async def upload_media(
             "deduplicated": True,
         }
 
-    # Generate keys & upload to S3 Cellar
+    # 3. Upload to S3 via threadpool
     file_id = uuid.uuid4()
     ext = Path(file.filename).suffix if file.filename else ""
     file_key = f"uploads/{user.id}/{file_id}{ext}"
-    
-    # Upload original to S3
-    upload_success = upload_bytes_to_s3(content, file_key, file.content_type)
-    if not upload_success:
-        raise HTTPException(status_code=500, detail="Failed to save file to object store.")
 
-    # Image metadata and S3 thumbnail generation
+    # Perform blocking S3 upload inside a threadpool
+    upload_success = await run_in_threadpool(
+        upload_file_to_s3, temp_file_path, file_key, file.content_type
+    )
+
+    if not upload_success:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+        raise HTTPException(status_code=500, detail="Failed to save file to S3 store.")
+
+    # Image metadata and thumbnail upload in threadpool
     width, height = None, None
     if file.content_type and file.content_type.startswith("image/"):
         try:
-            with Image.open(io.BytesIO(content)) as img:
-                width, height = img.size
-                # Generate thumbnail
-                thumb_io = io.BytesIO()
-                img.thumbnail((200, 200))
-                # Preserving format
-                img_format = img.format or "PNG"
-                img.save(thumb_io, format=img_format)
-                thumb_bytes = thumb_io.getvalue()
-                # Upload thumbnail to S3
-                thumb_key = f"uploads/{user.id}/{file_id}_thumb{ext}"
-                upload_bytes_to_s3(thumb_bytes, thumb_key, file.content_type)
+            def generate_and_upload_thumbnail():
+                with Image.open(temp_file_path) as img:
+                    w, h = img.size
+                    thumb_io = io.BytesIO()
+                    img.thumbnail((200, 200))
+                    img_format = img.format or "PNG"
+                    img.save(thumb_io, format=img_format)
+                    thumb_bytes = thumb_io.getvalue()
+                    thumb_key = f"uploads/{user.id}/{file_id}_thumb{ext}"
+                    upload_bytes_to_s3(thumb_bytes, thumb_key, file.content_type)
+                    return w, h
+
+            width, height = await run_in_threadpool(generate_and_upload_thumbnail)
         except Exception as e:
             logger.error("thumbnail_generation_failed", error=str(e))
 
-    # Parse and schedule text extraction if it's a document/parsable file
+    # Clean up temp file
+    if temp_file_path.exists():
+        temp_file_path.unlink()
+
+    # Determine parsability
     is_parsable = file.content_type in (
         "application/pdf", "text/plain", "text/csv", "text/markdown",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -230,7 +296,7 @@ async def upload_media(
         file_key=file_key,
         mime_type=file.content_type or "application/octet-stream",
         original_filename=file.filename or "unknown",
-        size_bytes=len(content),
+        size_bytes=size,
         width=width,
         height=height,
         file_hash=file_hash,
@@ -238,12 +304,31 @@ async def upload_media(
         extraction_status="processing" if is_parsable else "none",
     )
     db.add(asset)
-    await db.flush()
+    
+    try:
+        await db.commit()
+    except Exception as e:
+        logger.error("db_commit_failed_media", error=str(e))
+        await db.rollback()
+        await run_in_threadpool(delete_file_from_s3, file_key)
+        if file.content_type and file.content_type.startswith("image/"):
+            await run_in_threadpool(delete_file_from_s3, f"uploads/{user.id}/{file_id}_thumb{ext}")
+        raise HTTPException(status_code=500, detail="Database write failed. Cleaned up S3 upload.")
 
+    # Enqueue text extraction via ARQ Redis worker
     if is_parsable:
-        background_tasks.add_task(background_extract_task, file_id, content, file.content_type)
+        try:
+            arq_redis = await get_arq_redis()
+            await arq_redis.enqueue_job("process_document_task", str(file_id), file_key, file.content_type)
+            await arq_redis.close()
+            logger.info("enqueued_arq_job", asset_id=str(file_id))
+        except Exception as e:
+            logger.error("arq_enqueue_failed", asset_id=str(file_id), error=str(e))
+            asset.status = "failed"
+            asset.extraction_status = "failed"
+            await db.commit()
 
-    logger.info("media_uploaded", asset_id=str(file_id), mime=file.content_type, size=len(content))
+    logger.info("media_uploaded", asset_id=str(file_id), mime=file.content_type, size=size)
 
     return {
         "id": str(asset.id),
@@ -264,13 +349,16 @@ async def upload_media(
 @router.post("/url", status_code=status.HTTP_201_CREATED)
 async def scrap_media_url(
     body: ScrapUrlRequest,
-    background_tasks: BackgroundTasks,
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Scrape a media asset from a URL link, validate size/type, stream to Cellar, and save."""
+    """Scrape a media asset from a URL link in chunks, stream to Cellar S3 off-thread, and update database."""
     settings = get_settings()
     url = body.url
+
+    temp_dir = Path("app/temp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_file_path = temp_dir / f"{uuid.uuid4()}.tmp"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -296,33 +384,46 @@ async def scrap_media_url(
                     detail=f"Scraped file too large ({content_length_str} bytes). Max limit: {settings.MAX_UPLOAD_SIZE_MB}MB"
                 )
 
-            # 2. Fetch full file content
-            response = await client.get(url, follow_redirects=True)
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Failed to download file from link. Server returned status {response.status_code}"
-                )
-            
-            content = response.content
-            # Deduce Content-Type if head was empty
-            if not content_type:
-                content_type = response.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
-            
-            if content_type not in ALLOWED_MIME_TYPES:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported file type: {content_type}."
-                )
+            # 2. Stream chunked download directly to temp disk file while hashing
+            sha256 = hashlib.sha256()
+            size = 0
 
-    except httpx.RequestError as exc:
+            async with client.stream("GET", url, follow_redirects=True) as response:
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to download file from link. Server returned status {response.status_code}"
+                    )
+                
+                if not content_type:
+                    content_type = response.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+                if content_type not in ALLOWED_MIME_TYPES:
+                    raise HTTPException(status_code=400, detail=f"Unsupported file type scraped: {content_type}.")
+
+                async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                    size += len(chunk)
+                    if size > settings.max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Scraped file too large. Max limit: {settings.MAX_UPLOAD_SIZE_MB}MB"
+                        )
+                    sha256.update(chunk)
+                    with open(temp_file_path, "ab") as f:
+                        f.write(chunk)
+
+            file_hash = sha256.hexdigest()
+
+    except Exception as e:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(
             status_code=400,
-            detail=f"HTTP network request failed to download the link: {exc}"
+            detail=f"HTTP network request failed to download the link: {str(e)}"
         )
 
     # 3. Deduplication Check
-    file_hash = compute_sha256(content)
     dup_result = await db.execute(
         select(MediaAsset).where(
             MediaAsset.user_id == user.id,
@@ -332,6 +433,8 @@ async def scrap_media_url(
     duplicate = dup_result.scalar_one_or_none()
     if duplicate:
         logger.info("url_scrap_deduplicated", asset_id=str(duplicate.id), url=url)
+        if temp_file_path.exists():
+            temp_file_path.unlink()
         return {
             "id": str(duplicate.id),
             "filename": duplicate.original_filename,
@@ -350,7 +453,6 @@ async def scrap_media_url(
 
     # Extract filename from URL
     filename = Path(url.split("?")[0]).name or "scraped_file"
-    # Ensure standard filename extension matches MIME
     ext = Path(filename).suffix
     if not ext:
         if content_type == "application/pdf":
@@ -365,28 +467,41 @@ async def scrap_media_url(
     file_id = uuid.uuid4()
     file_key = f"uploads/{user.id}/{file_id}{ext}"
 
-    # Upload to S3 Cellar
-    upload_success = upload_bytes_to_s3(content, file_key, content_type)
-    if not upload_success:
-        raise HTTPException(status_code=500, detail="Failed to save scraped file to object store.")
+    # 4. Upload to S3 Cellar via threadpool
+    upload_success = await run_in_threadpool(
+        upload_file_to_s3, temp_file_path, file_key, content_type
+    )
 
-    # Image metadata and S3 thumbnail generation
+    if not upload_success:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+        raise HTTPException(status_code=500, detail="Failed to save scraped file to S3 store.")
+
+    # Image metadata and thumbnail upload in threadpool
     width, height = None, None
     if content_type.startswith("image/"):
         try:
-            with Image.open(io.BytesIO(content)) as img:
-                width, height = img.size
-                thumb_io = io.BytesIO()
-                img.thumbnail((200, 200))
-                img_format = img.format or "PNG"
-                img.save(thumb_io, format=img_format)
-                thumb_bytes = thumb_io.getvalue()
-                thumb_key = f"uploads/{user.id}/{file_id}_thumb{ext}"
-                upload_bytes_to_s3(thumb_bytes, thumb_key, content_type)
+            def generate_and_upload_thumbnail():
+                with Image.open(temp_file_path) as img:
+                    w, h = img.size
+                    thumb_io = io.BytesIO()
+                    img.thumbnail((200, 200))
+                    img_format = img.format or "PNG"
+                    img.save(thumb_io, format=img_format)
+                    thumb_bytes = thumb_io.getvalue()
+                    thumb_key = f"uploads/{user.id}/{file_id}_thumb{ext}"
+                    upload_bytes_to_s3(thumb_bytes, thumb_key, content_type)
+                    return w, h
+
+            width, height = await run_in_threadpool(generate_and_upload_thumbnail)
         except Exception as e:
             logger.error("thumbnail_generation_failed", error=str(e))
 
-    # Parse and schedule text extraction if document
+    # Clean up temp file
+    if temp_file_path.exists():
+        temp_file_path.unlink()
+
+    # Determine parsability
     is_parsable = content_type in (
         "application/pdf", "text/plain", "text/csv", "text/markdown",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -399,21 +514,40 @@ async def scrap_media_url(
         file_key=file_key,
         mime_type=content_type,
         original_filename=filename,
-        size_bytes=len(content),
+        size_bytes=size,
         width=width,
         height=height,
         file_hash=file_hash,
-        source_url=url,
         status="processing" if is_parsable else "completed",
         extraction_status="processing" if is_parsable else "none",
+        source_url=url,
     )
     db.add(asset)
-    await db.flush()
 
+    try:
+        await db.commit()
+    except Exception as e:
+        logger.error("db_commit_failed_scraped_media", error=str(e))
+        await db.rollback()
+        await run_in_threadpool(delete_file_from_s3, file_key)
+        if content_type.startswith("image/"):
+            await run_in_threadpool(delete_file_from_s3, f"uploads/{user.id}/{file_id}_thumb{ext}")
+        raise HTTPException(status_code=500, detail="Database write failed. Cleaned up S3 upload.")
+
+    # Enqueue text extraction via ARQ Redis worker
     if is_parsable:
-        background_tasks.add_task(background_extract_task, file_id, content, content_type)
+        try:
+            arq_redis = await get_arq_redis()
+            await arq_redis.enqueue_job("process_document_task", str(file_id), file_key, content_type)
+            await arq_redis.close()
+            logger.info("enqueued_arq_job", asset_id=str(file_id))
+        except Exception as e:
+            logger.error("arq_enqueue_failed", asset_id=str(file_id), error=str(e))
+            asset.status = "failed"
+            asset.extraction_status = "failed"
+            await db.commit()
 
-    logger.info("media_scraped_url", asset_id=str(file_id), mime=content_type, size=len(content))
+    logger.info("url_scraped", asset_id=str(file_id), mime=content_type, size=size)
 
     return {
         "id": str(asset.id),
@@ -437,7 +571,7 @@ async def get_media(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve a media asset by downloading it from S3/Cellar."""
+    """Serve a media asset by downloading it from S3/Cellar in a non-blocking threadpool."""
     result = await db.execute(
         select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.user_id == user.id)
     )
@@ -445,7 +579,7 @@ async def get_media(
     if not asset:
         raise HTTPException(status_code=404, detail="Media not found")
 
-    content = download_bytes_from_s3(asset.file_key)
+    content = await run_in_threadpool(download_bytes_from_s3, asset.file_key)
     if not content:
         raise HTTPException(status_code=404, detail="File not found in object storage.")
 
@@ -464,7 +598,7 @@ async def get_thumbnail(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve a media thumbnail by downloading it from S3/Cellar."""
+    """Serve a media thumbnail by downloading it from S3/Cellar in a non-blocking threadpool."""
     result = await db.execute(
         select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.user_id == user.id)
     )
@@ -475,10 +609,10 @@ async def get_thumbnail(
     ext = Path(asset.original_filename).suffix
     thumb_key = f"uploads/{user.id}/{asset.id}_thumb{ext}"
     
-    content = download_bytes_from_s3(thumb_key)
+    content = await run_in_threadpool(download_bytes_from_s3, thumb_key)
     if not content:
         # Fallback to original image if thumbnail not found
-        content = download_bytes_from_s3(asset.file_key)
+        content = await run_in_threadpool(download_bytes_from_s3, asset.file_key)
         if not content:
             raise HTTPException(status_code=404, detail="Thumbnail not found")
 
@@ -491,7 +625,7 @@ async def delete_media(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a media asset from DB and S3 Object Storage."""
+    """Delete a media asset from DB and S3 Object Storage in a non-blocking threadpool."""
     result = await db.execute(
         select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.user_id == user.id)
     )
@@ -500,13 +634,13 @@ async def delete_media(
         raise HTTPException(status_code=404, detail="Media not found")
 
     # Delete original from S3
-    delete_file_from_s3(asset.file_key)
+    await run_in_threadpool(delete_file_from_s3, asset.file_key)
 
     # Delete thumbnail if it's an image
     if asset.mime_type.startswith("image/"):
         ext = Path(asset.original_filename).suffix
         thumb_key = f"uploads/{user.id}/{asset.id}_thumb{ext}"
-        delete_file_from_s3(thumb_key)
+        await run_in_threadpool(delete_file_from_s3, thumb_key)
 
     # Cascading database deletes (including ChatResources)
     await db.execute(delete(ChatResource).where(ChatResource.media_asset_id == asset.id))
@@ -612,8 +746,12 @@ async def organize_media(
                     temperature=0.2,
                     max_tokens=1000,
                 )
+                if conn_info["provider_type"] == "openai":
+                    llm = llm.bind(response_format={"type": "json_object"})
             else:
                 llm = _build_legacy_llm(settings.DEFAULT_MODEL_ID, temperature=0.2, max_tokens=1000)
+                if settings.DEFAULT_MODEL_ID.startswith(("gpt-", "o1-", "o3-")):
+                    llm = llm.bind(response_format={"type": "json_object"})
 
             messages = [
                 SystemMessage(content=system_prompt),
