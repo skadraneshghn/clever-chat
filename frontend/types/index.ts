@@ -201,6 +201,7 @@ export interface DiscoveredModel {
     vision?: boolean;
     reasoning?: boolean;
     function_calling?: boolean;
+    image_generation?: boolean;
   } | null;
   created_at: string;
 }
@@ -233,6 +234,7 @@ export interface AvailableModel {
     vision?: boolean;
     reasoning?: boolean;
     function_calling?: boolean;
+    image_generation?: boolean;
   } | null;
   is_active: boolean;
 }

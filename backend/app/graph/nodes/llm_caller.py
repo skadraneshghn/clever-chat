@@ -263,6 +263,17 @@ async def llm_caller(state: AgentState) -> dict:
 # ── Image Generation Implementation ─────────────────────────────────────────
 
 
+# Maps Pillow image formats to (file extension, MIME type) for persisting
+# generated images. The upstream API frequently returns WebP even when PNG is
+# requested, so we detect the real format rather than assuming PNG.
+_IMAGE_FORMAT_MAP: dict[str, tuple[str, str]] = {
+    "PNG": (".png", "image/png"),
+    "JPEG": (".jpg", "image/jpeg"),
+    "WEBP": (".webp", "image/webp"),
+    "GIF": (".gif", "image/gif"),
+}
+
+
 async def _image_generation_caller(
     state: AgentState,
     conn_info: dict | None,
@@ -271,18 +282,23 @@ async def _image_generation_caller(
 ) -> dict:
     """Generate images using the OpenAI-compatible images API.
 
-    Downloads each image, saves to disk, creates MediaAsset DB records,
-    and returns structured asset metadata.
+    Fetches each generated image (from a returned URL or inline b64_json),
+    uploads it to S3 object storage, creates MediaAsset DB records, and
+    returns structured asset metadata that the frontend can render.
     """
     import base64
+    import io as io_mod
     import uuid as uuid_mod
-    from pathlib import Path
+
+    import httpx
+    from fastapi.concurrency import run_in_threadpool
+    from PIL import Image as PILImage
 
     from app.core.config import get_settings
     from app.core.database import get_db_context
     from app.models.media_asset import MediaAsset
+    from app.services.s3_storage import upload_bytes_to_s3
 
-    settings = get_settings()
     image_n = state.get("image_n", 1)
     messages = state.get("messages", [])
 
@@ -310,8 +326,7 @@ async def _image_generation_caller(
         api_key = conn_info["api_key"] or "sk-placeholder"
         upstream_model = conn_info["model_id"]
     else:
-        from app.core.config import get_settings as _gs
-        _s = _gs()
+        _s = get_settings()
         base_url = "https://api.openai.com"
         api_key = _s.OPENAI_API_KEY or "sk-placeholder"
         upstream_model = model_id
@@ -332,11 +347,14 @@ async def _image_generation_caller(
     try:
         import openai as openai_lib
         client = openai_lib.AsyncOpenAI(api_key=api_key, base_url=api_base)
+        # response_format is intentionally omitted: many OpenAI-compatible
+        # gateways (including clever-ai-gate) only return a download URL and
+        # silently ignore response_format="b64_json". Both url and b64_json
+        # are handled in the persistence step below so either works.
         response = await client.images.generate(
             model=upstream_model,
             prompt=prompt,
             n=image_n,
-            response_format="b64_json",
             size="1024x1024",
         )
     except Exception as exc:
@@ -346,51 +364,86 @@ async def _image_generation_caller(
             "error_message": f"Image generation failed: {exc}",
         }
 
-    # Persist each image to disk and create MediaAsset records
-    try:
-        import uuid as uuid_mod
-        user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
-        asset_dir = settings.upload_path / str(user_uuid)
-        asset_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        logger.error("image_save_dir_error", error=str(exc))
-        return {"finish_reason": "error", "error_message": "Failed to prepare storage directory."}
+    user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
 
     generated_assets = []
 
     async with get_db_context() as db:
-        for img_data in response.data:
+        for idx, img_data in enumerate(response.data):
             try:
-                raw_bytes = base64.b64decode(img_data.b64_json)
+                # Obtain raw image bytes — support both inline b64 and a URL.
+                # Many gateways ignore response_format and only return a URL.
+                raw_bytes: bytes | None = None
+                source_url: str | None = None
+
+                if getattr(img_data, "b64_json", None):
+                    raw_bytes = base64.b64decode(img_data.b64_json)
+                elif getattr(img_data, "url", None):
+                    source_url = img_data.url
+                    async with httpx.AsyncClient(timeout=120.0) as dl:
+                        dl_resp = await dl.get(source_url)
+                        dl_resp.raise_for_status()
+                        raw_bytes = dl_resp.content
+                else:
+                    logger.warning("image_no_payload", index=idx)
+                    continue
+
+                if not raw_bytes:
+                    logger.warning("image_empty_bytes", index=idx)
+                    continue
+
+                # Detect the real format/dimensions (the API often returns
+                # WebP rather than the PNG we requested).
+                with PILImage.open(io_mod.BytesIO(raw_bytes)) as pil_img:
+                    fmt = (pil_img.format or "PNG").upper()
+                    width, height = pil_img.size
+
+                ext, mime_type = _IMAGE_FORMAT_MAP.get(fmt, (".png", "image/png"))
+
                 asset_id = uuid_mod.uuid4()
-                filename = f"{asset_id}.png"
-                file_path = asset_dir / filename
+                file_key = f"uploads/{user_uuid}/{asset_id}{ext}"
 
-                file_path.write_bytes(raw_bytes)
+                # Upload the original to S3 (boto3 is blocking → threadpool).
+                uploaded = await run_in_threadpool(
+                    upload_bytes_to_s3, raw_bytes, file_key, mime_type
+                )
+                if not uploaded:
+                    logger.error("image_s3_upload_failed", asset_id=str(asset_id))
+                    continue
 
-                # Generate thumbnail
+                # Generate + upload a thumbnail. The key must match the pattern
+                # used by GET /media/{id}/thumbnail: uploads/{user_id}/{id}_thumb{ext}
+                has_thumb = False
                 try:
-                    from PIL import Image as PILImage
-                    thumb_path = asset_dir / f"{asset_id}_thumb.jpg"
-                    with PILImage.open(file_path) as pil_img:
-                        pil_img = pil_img.convert("RGB")
-                        pil_img.thumbnail((256, 256))
-                        pil_img.save(thumb_path, "JPEG", quality=82, optimize=True)
+                    def _make_thumb(data: bytes = raw_bytes, save_fmt: str = fmt) -> bytes:
+                        thumb_io = io_mod.BytesIO()
+                        with PILImage.open(io_mod.BytesIO(data)) as im:
+                            im = im.convert("RGB")
+                            im.thumbnail((256, 256))
+                            im.save(thumb_io, format=save_fmt)
+                        return thumb_io.getvalue()
+
+                    thumb_bytes = await run_in_threadpool(_make_thumb)
+                    thumb_key = f"uploads/{user_uuid}/{asset_id}_thumb{ext}"
+                    await run_in_threadpool(
+                        upload_bytes_to_s3, thumb_bytes, thumb_key, mime_type
+                    )
                     has_thumb = True
                 except Exception as thumb_exc:
                     logger.warning("image_thumb_failed", error=str(thumb_exc))
-                    has_thumb = False
 
                 # DB record
                 asset = MediaAsset(
                     id=asset_id,
                     user_id=user_uuid,
-                    file_key=f"uploads/{user_uuid}/{filename}",
-                    mime_type="image/png",
-                    original_filename=filename,
+                    file_key=file_key,
+                    mime_type=mime_type,
+                    original_filename=f"{asset_id}{ext}",
                     size_bytes=len(raw_bytes),
-                    width=1024,
-                    height=1024,
+                    width=width,
+                    height=height,
+                    source_url=source_url,
+                    status="completed",
                 )
                 db.add(asset)
                 await db.flush()
@@ -400,7 +453,7 @@ async def _image_generation_caller(
                     "url": f"/api/v1/media/{asset_id}",
                     "thumbnail_url": f"/api/v1/media/{asset_id}/thumbnail" if has_thumb else f"/api/v1/media/{asset_id}",
                 })
-                logger.info("image_saved", asset_id=str(asset_id))
+                logger.info("image_saved", asset_id=str(asset_id), mime=mime_type)
 
             except Exception as img_exc:
                 logger.error("image_save_failed", error=str(img_exc))

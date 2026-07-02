@@ -203,6 +203,9 @@ export default function ChatHeader() {
                               {model.capabilities?.reasoning && (
                                 <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 600 }}>⚡</span>
                               )}
+                              {model.capabilities?.image_generation && (
+                                <span style={{ fontSize: 9, color: '#10b981', fontWeight: 600 }} title="Image generation">🖼</span>
+                              )}
                             </button>
                           ))}
                         </div>

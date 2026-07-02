@@ -700,7 +700,22 @@ export default function InputBar({ conversationId }: InputBarProps) {
 
               {/* Image generation sparkle toggle */}
               <button
-                onClick={toggleImageGenerationMode}
+                onClick={() => {
+                  const enabling = !imageGenerationMode;
+                  toggleImageGenerationMode();
+                  if (enabling) {
+                    const isCurrentImage = currentModel?.capabilities?.image_generation === true;
+                    if (!isCurrentImage) {
+                      const firstImage = availableModels.find((m) => m.capabilities?.image_generation === true);
+                      if (firstImage) {
+                        updatePreferences({ default_model_id: firstImage.model_id });
+                        toast.info(`Switched to image model: ${firstImage.display_name}`);
+                      } else {
+                        toast.warning('No image generation model available. Add a provider with an image model (e.g. flux-schnell).');
+                      }
+                    }
+                  }
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 5,
                   padding: '5px 10px', height: 32,

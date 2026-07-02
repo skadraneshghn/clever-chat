@@ -9,7 +9,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useRouter } from 'next/navigation';
 import {
-  FiServer, FiCloud, FiCpu, FiGlobe, FiEye, FiZap, FiLoader, FiPlus,
+  FiServer, FiCloud, FiCpu, FiGlobe, FiEye, FiZap, FiLoader, FiPlus, FiImage,
 } from 'react-icons/fi';
 import type { ProviderType } from '@/types';
 
@@ -130,6 +130,11 @@ export default function ModelsPage() {
                         {model.capabilities?.reasoning && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#f59e0b' }}>
                             <FiZap size={10} /> Reasoning
+                          </span>
+                        )}
+                        {model.capabilities?.image_generation && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#10b981' }}>
+                            <FiImage size={10} /> Image
                           </span>
                         )}
                       </div>
