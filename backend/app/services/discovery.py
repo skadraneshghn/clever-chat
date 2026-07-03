@@ -10,10 +10,18 @@ logger = structlog.get_logger()
 
 # ── Capability Mapper ────────────────────────────────────────────────────────
 
-def _detect_capabilities(model_id: str) -> dict:
-    """Single-pass string filter to auto-tag model capabilities."""
+def _detect_capabilities(model_id: str, reported: dict | None = None) -> dict:
+    """Auto-tag model capabilities from the model id, merging any capabilities
+    reported by the provider.
+
+    Name-based heuristics can only infer vision/reasoning/function_calling.
+    Modalities like image_generation, audio, video and code cannot be inferred
+    from the name, so we trust the provider's reported capabilities (e.g. the
+    clever-ai-gate /v1/models endpoint advertises ``image_generation: true``
+    for flux/dall-e/stable-diffusion models) and overlay them here.
+    """
     mid = model_id.lower()
-    return {
+    caps = {
         "vision": any(kw in mid for kw in ("vision", "vl", "llava", "4o", "o4", "gpt-4-turbo")),
         "reasoning": (
             any(kw in mid for kw in ("r1", "think", "reasoning", "qwq", "o3-"))
@@ -21,6 +29,11 @@ def _detect_capabilities(model_id: str) -> dict:
         ),
         "function_calling": any(kw in mid for kw in ("gpt-", "claude-", "mistral", "command")),
     }
+    if isinstance(reported, dict):
+        for key, value in reported.items():
+            if value:
+                caps[key] = True
+    return caps
 
 def is_chat_model(model_id: str) -> bool:
     """Filter out non-chat models (embeddings, reward models, safety guards, etc.)."""
@@ -102,10 +115,11 @@ async def discover_openai_compatible(base_url: str, api_key: str | None = None) 
         model_id = entry.get("id", "") if isinstance(entry, dict) else str(entry)
         if not model_id or not is_chat_model(model_id):
             continue
+        reported_caps = entry.get("capabilities") if isinstance(entry, dict) else None
         models.append({
             "model_id": model_id,
             "display_name": _make_display_name(model_id),
-            "capabilities": _detect_capabilities(model_id),
+            "capabilities": _detect_capabilities(model_id, reported_caps),
         })
 
     logger.info(

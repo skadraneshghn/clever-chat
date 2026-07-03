@@ -29,24 +29,21 @@ async def input_validator(state: AgentState) -> dict:
     if not isinstance(last_msg, HumanMessage):
         return {"finish_reason": "error", "error_message": "Expected a user message."}
 
-    # ── Image-generation capability pre-flight ───────────────────────────────
+    # ── Image-generation capability check (advisory, non-blocking) ────────────
+    # We intentionally do NOT hard-block here. Provider-reported capabilities
+    # (notably image_generation) may be absent from the DB on older syncs,
+    # which would wrongly block valid image models. Instead we log a warning
+    # and let the image generator attempt the call — the provider surfaces a
+    # clear error if the model genuinely cannot generate images.
     if state.get("image_generation_mode", False):
         model_id = state.get("model_id", "")
         user_id = state.get("user_id", "")
         capable = await _check_image_capability(model_id, user_id)
         if not capable:
             logger.warning(
-                "image_gen_capability_check_failed",
+                "image_gen_capability_not_confirmed_proceeding",
                 model_id=model_id,
             )
-            return {
-                "finish_reason": "error",
-                "error_message": (
-                    f"The selected model \"{model_id}\" does not support image generation. "
-                    "Please switch to a model with image generation capability "
-                    "(e.g. dall-e-3, gpt-image-1) or disable image mode."
-                ),
-            }
 
     # Determine if retrieval is needed (heuristic)
     content = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -100,6 +100,20 @@ async def _sync_models(
             )
             db.add(dm)
             new_count += 1
+        else:
+            # Refresh metadata for already-known models so provider-reported
+            # capabilities (e.g. image_generation) are picked up on re-sync.
+            await db.execute(
+                update(DiscoveredModel)
+                .where(
+                    DiscoveredModel.connection_id == conn.id,
+                    DiscoveredModel.model_id == model_data["model_id"],
+                )
+                .values(
+                    display_name=model_data["display_name"],
+                    capabilities=model_data["capabilities"],
+                )
+            )
 
     await db.flush()
     logger.info(
