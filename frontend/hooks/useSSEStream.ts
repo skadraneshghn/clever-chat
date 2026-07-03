@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import type { ChatStreamRequest, Message } from '@/types';
 import { toast } from 'sonner';
 import { useRouter, usePathname } from 'next/navigation';
+import { api } from '@/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -62,7 +63,15 @@ export function useSSEStream() {
       addOptimisticUserMessage(request.message, request.conversation_id || 'new', doneAttachments);
       setStreamingState(true);
 
-      const token = localStorage.getItem('access_token');
+      // Make sure the access token is fresh before opening the stream — a
+      // long-lived SSE connection can't refresh mid-stream.
+      const token = await api.ensureValidToken();
+      if (!token) {
+        setStreamingState(false);
+        toast.error('Your session has expired. Please log in again.');
+        window.location.href = '/login';
+        return;
+      }
       let conversationId = request.conversation_id;
       let messageId = '';
       let fullContent = '';

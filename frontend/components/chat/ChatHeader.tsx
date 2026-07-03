@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Settings, Bell, Share2, Sun, Moon, ChevronRight, Bot, Server, Cloud, Cpu, Globe } from 'lucide-react';
+import { Search, Plus, Settings, Bell, Share2, Sun, Moon, ChevronRight, Bot, Server, Cloud, Cpu, Globe, ImageIcon, Eye, Zap } from 'lucide-react';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -198,13 +198,13 @@ export default function ChatHeader() {
                                 </div>
                               </div>
                               {model.capabilities?.vision && (
-                                <span style={{ fontSize: 9, color: '#8b5cf6', fontWeight: 600 }}>👁</span>
+                                <Eye size={12} color="#8b5cf6" />
                               )}
                               {model.capabilities?.reasoning && (
-                                <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 600 }}>⚡</span>
+                                <Zap size={12} color="#f59e0b" />
                               )}
                               {model.capabilities?.image_generation && (
-                                <span style={{ fontSize: 9, color: '#10b981', fontWeight: 600 }} title="Image generation">🖼</span>
+                                <ImageIcon size={12} color="#10b981" />
                               )}
                             </button>
                           ))}

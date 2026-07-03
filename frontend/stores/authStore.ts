@@ -74,10 +74,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const user = await api.get<User>('/auth/me');
       set({ user, isAuthenticated: true });
-    } catch {
-      set({ user: null, isAuthenticated: false });
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+    } catch (err) {
+      // Only tear down the session on a hard auth failure. Transient errors
+      // (network blips, 5xx) must not log the user out.
+      const isAuthError = err instanceof ApiError && (err.status === 401 || err.status === 403);
+      if (isAuthError) {
+        set({ user: null, isAuthenticated: false });
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+      }
     }
   },
 

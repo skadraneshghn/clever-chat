@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -275,59 +276,110 @@ async def chat_stream(
                 "user_message_id": str(user_message.id),
             })
 
-            # Stream from LangGraph
+            # Stream from LangGraph.
+            #
+            # Image generation is a long-running, non-streaming operation that
+            # can take 30-60+ seconds. During that time no graph events are
+            # emitted, leaving the SSE connection idle. Idle SSE connections get
+            # dropped by reverse proxies / load balancers, so the final result
+            # event never reaches the client ("goes to generating, no result").
+            #
+            # To prevent this we run the graph event loop in a background task
+            # and emit SSE heartbeat comments while waiting for the next event.
             generated_images: list[dict] = []
-            async for event in graph.astream_events(graph_input, version="v2"):
-                kind = event.get("event", "")
+            stream_error = False
+            event_queue: asyncio.Queue = asyncio.Queue()
+            _SENTINEL = object()
 
-                # Stream tokens from LLM (text mode only)
-                if kind == "on_chat_model_stream" and not body.image_generation_mode:
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and isinstance(chunk, AIMessageChunk):
-                        token = chunk.content
-                        if token:
-                            full_response += token
-                            yield await _sse_event("token", {
-                                "content": token,
+            async def _produce_graph_events():
+                try:
+                    async for ev in graph.astream_events(graph_input, version="v2"):
+                        await event_queue.put(ev)
+                except Exception as exc:
+                    await event_queue.put(exc)
+                finally:
+                    await event_queue.put(_SENTINEL)
+
+            producer = asyncio.create_task(_produce_graph_events())
+
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(event_queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        # SSE comment line — ignored by clients but keeps the
+                        # connection alive during long image generation.
+                        yield ": heartbeat\n\n"
+                        continue
+
+                    if item is _SENTINEL:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+
+                    event = item
+                    kind = event.get("event", "")
+
+                    # Stream tokens from LLM (text mode only)
+                    if kind == "on_chat_model_stream" and not body.image_generation_mode:
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and isinstance(chunk, AIMessageChunk):
+                            token = chunk.content
+                            if token:
+                                full_response += token
+                                yield await _sse_event("token", {
+                                    "content": token,
+                                })
+
+                    # Node execution events
+                    elif kind == "on_chain_start":
+                        node_name = event.get("name", "")
+                        if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
+                            # Emit a friendlier node name for image generation
+                            display_name = "image_generator" if (
+                                node_name == "llm_caller" and body.image_generation_mode
+                            ) else node_name
+                            yield await _sse_event("node_start", {
+                                "node": display_name,
                             })
 
-                # Node execution events
-                elif kind == "on_chain_start":
-                    node_name = event.get("name", "")
-                    if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
-                        # Emit a friendlier node name for image generation
-                        display_name = "image_generator" if (
-                            node_name == "llm_caller" and body.image_generation_mode
-                        ) else node_name
-                        yield await _sse_event("node_start", {
-                            "node": display_name,
-                        })
+                    elif kind == "on_chain_end":
+                        node_name = event.get("name", "")
+                        output = event.get("data", {}).get("output", {})
+                        if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
+                            if isinstance(output, dict):
+                                input_tokens = output.get("input_tokens", input_tokens)
+                                output_tokens = output.get("output_tokens", output_tokens)
 
-                elif kind == "on_chain_end":
-                    node_name = event.get("name", "")
-                    output = event.get("data", {}).get("output", {})
-                    if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
-                        if isinstance(output, dict):
-                            input_tokens = output.get("input_tokens", input_tokens)
-                            output_tokens = output.get("output_tokens", output_tokens)
+                                # Capture generated images
+                                if output.get("finish_reason") == "image_generated":
+                                    generated_images = output.get("generated_image_assets", [])
 
-                            # Capture generated images
-                            if output.get("finish_reason") == "image_generated":
-                                generated_images = output.get("generated_image_assets", [])
+                                if output.get("finish_reason") == "error":
+                                    yield await _sse_event("error", {
+                                        "code": "llm_call_failed",
+                                        "message": output.get("error_message", "LLM call failed"),
+                                        "recoverable": False,
+                                    })
+                                    stream_error = True
+                                    break
+                            display_name = "image_generator" if (
+                                node_name == "llm_caller" and body.image_generation_mode
+                            ) else node_name
+                            yield await _sse_event("node_end", {
+                                "node": display_name,
+                            })
+            finally:
+                if not producer.done():
+                    producer.cancel()
+                    try:
+                        await producer
+                    except BaseException:
+                        pass
 
-                            if output.get("finish_reason") == "error":
-                                yield await _sse_event("error", {
-                                    "code": "llm_call_failed",
-                                    "message": output.get("error_message", "LLM call failed"),
-                                    "recoverable": False,
-                                })
-                                return
-                        display_name = "image_generator" if (
-                            node_name == "llm_caller" and body.image_generation_mode
-                        ) else node_name
-                        yield await _sse_event("node_end", {
-                            "node": display_name,
-                        })
+            # An error event was already emitted — skip persistence.
+            if stream_error:
+                return
 
             # Calculate latency
             latency_ms = int((time.monotonic() - start_time) * 1000)
