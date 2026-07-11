@@ -32,6 +32,53 @@ async def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _extract_chunk_content(chunk: AIMessageChunk) -> tuple[str, str]:
+    """Safely extract (text_token, thinking_token) from an AIMessageChunk.
+
+    Handles all known provider formats:
+    - OpenAI/compatible: content is a plain string
+    - Anthropic extended thinking: content is a list of dicts with type='thinking'|'text'
+    - Some providers return non-dict items (integers, None) inside the content list — these
+      are skipped to prevent the Pydantic 'Input should be a valid string' validation error
+      that occurs when LangGraph tries to accumulate chunks containing invalid types.
+    - Reasoning/thinking content can also live in additional_kwargs.reasoning_content or
+      as a top-level .reasoning_content attribute (DeepSeek R1, QwQ, etc.)
+    """
+    text_token = ""
+    thinking_token = ""
+
+    # ── Extract thinking/reasoning from extra attributes first ─────────────
+    additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
+    thinking_token = str(additional_kwargs.get("reasoning_content") or "") or ""
+    if not thinking_token:
+        thinking_token = str(getattr(chunk, "reasoning_content", None) or "") or ""
+
+    # ── Extract text (and more thinking) from content ──────────────────────
+    raw = chunk.content  # type: ignore[attr-defined]
+
+    if isinstance(raw, str):
+        # Simple string — skip if we already found it as thinking
+        text_token = raw
+
+    elif isinstance(raw, list):
+        for block in raw:
+            # Guard: skip anything that isn't a dict (e.g., bare integers)
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type", "")
+            if block_type == "text":
+                text_token += str(block.get("text") or "")
+            elif block_type in ("thinking", "reasoning"):
+                # Anthropic extended thinking
+                val = block.get("thinking") or block.get("text") or ""
+                thinking_token += str(val)
+            # input_json_delta, tool_use, etc. — ignored intentionally
+
+    # Else: int / None / unexpected type — return empty strings (safe fallback)
+    return text_token, thinking_token
+
+
+
 def _message_to_response(msg: Message, sender_username: str | None = None) -> MessageResponse:
     """Convert a Message ORM object to MessageResponse schema."""
     return MessageResponse(
@@ -351,7 +398,17 @@ async def chat_stream(
                     async for ev in graph.astream_events(graph_input, version="v2"):
                         await event_queue.put(ev)
                 except Exception as exc:
-                    await event_queue.put(exc)
+                    # Pydantic ValidationError from malformed chunks (e.g., content=<int>)
+                    # should not kill the stream — log and put sentinel.
+                    exc_name = type(exc).__name__
+                    if "ValidationError" in exc_name or "validation" in str(exc).lower():
+                        logger.warning(
+                            "stream_chunk_validation_error",
+                            error=str(exc)[:300],
+                            note="Skipping malformed chunk from provider",
+                        )
+                    else:
+                        await event_queue.put(exc)
                 finally:
                     await event_queue.put(_SENTINEL)
 
@@ -376,33 +433,13 @@ async def chat_stream(
                     if kind == "on_chat_model_stream" and not body.image_generation_mode:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and isinstance(chunk, AIMessageChunk):
-                            reasoning_chunk = ""
-                            additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-                            reasoning_chunk = additional_kwargs.get("reasoning_content", "") or ""
-                            if not reasoning_chunk:
-                                reasoning_chunk = getattr(chunk, "reasoning_content", None) or ""
-                            if not reasoning_chunk and isinstance(chunk.content, list):
-                                for block in chunk.content:
-                                    if isinstance(block, dict) and block.get("type") in ("thinking", "reasoning"):
-                                        reasoning_chunk += block.get("thinking", "") or block.get("text", "") or ""
-
+                            token, reasoning_chunk = _extract_chunk_content(chunk)
                             if reasoning_chunk:
                                 full_thinking += reasoning_chunk
                                 yield await _sse_event("thinking", {"content": reasoning_chunk})
-
-                            token = chunk.content
-                            if isinstance(token, str):
-                                if token:
-                                    full_response += token
-                                    yield await _sse_event("token", {"content": token})
-                            elif isinstance(token, list):
-                                text_parts = ""
-                                for block in token:
-                                    if isinstance(block, dict) and block.get("type") == "text":
-                                        text_parts += block.get("text", "")
-                                if text_parts:
-                                    full_response += text_parts
-                                    yield await _sse_event("token", {"content": text_parts})
+                            if token:
+                                full_response += token
+                                yield await _sse_event("token", {"content": token})
 
                     elif kind == "on_chain_start":
                         node_name = event.get("name", "")
@@ -796,7 +833,15 @@ async def edit_message(
                     async for ev in graph.astream_events(graph_input, version="v2"):
                         await event_queue.put(ev)
                 except Exception as exc:
-                    await event_queue.put(exc)
+                    exc_name = type(exc).__name__
+                    if "ValidationError" in exc_name or "validation" in str(exc).lower():
+                        logger.warning(
+                            "edit_stream_chunk_validation_error",
+                            error=str(exc)[:300],
+                            note="Skipping malformed chunk from provider",
+                        )
+                    else:
+                        await event_queue.put(exc)
                 finally:
                     await event_queue.put(_SENTINEL)
 
@@ -821,15 +866,11 @@ async def edit_message(
                     if kind == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and isinstance(chunk, AIMessageChunk):
-                            additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-                            reasoning_chunk = additional_kwargs.get("reasoning_content", "") or ""
-                            if not reasoning_chunk:
-                                reasoning_chunk = getattr(chunk, "reasoning_content", None) or ""
+                            token, reasoning_chunk = _extract_chunk_content(chunk)
                             if reasoning_chunk:
                                 full_thinking += reasoning_chunk
                                 yield await _sse_event("thinking", {"content": reasoning_chunk})
-                            token = chunk.content
-                            if isinstance(token, str) and token:
+                            if token:
                                 full_response += token
                                 yield await _sse_event("token", {"content": token})
 
