@@ -22,16 +22,18 @@ import { useAuthStore } from '@/stores/authStore';
 import { toast } from 'sonner';
 import type { Message, ContentBlock } from '@/types';
 import { ImageGallery, type GalleryImage } from './ImageGallery';
+import ThinkingPanel from './ThinkingPanel';
 import { ZoomIn } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
   streamingContent?: string;
+  streamingThinking?: string;
   isLast?: boolean;
 }
 
-export default function MessageBubble({ message, isStreaming, streamingContent, isLast }: MessageBubbleProps) {
+export default function MessageBubble({ message, isStreaming, streamingContent, streamingThinking, isLast }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState<number | null>(null);
@@ -55,6 +57,15 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     .map((b: ContentBlock) => b.text || '')
     .join('');
   const displayContent = isStreaming ? (streamingContent || '') : textContent;
+
+  // Extract thinking / reasoning content (persisted on AI messages)
+  const persistedThinking = message.content
+    .filter((b: ContentBlock) => b.type === 'thinking')
+    .map((b: ContentBlock) => b.text || '')
+    .join('');
+  const displayThinking = isStreaming ? (streamingThinking || '') : persistedThinking;
+  // Thinking tokens are "active" while streaming and no answer text has started yet
+  const isThinkingStreaming = !!isStreaming && !!streamingThinking && !streamingContent;
 
   // Extract image blocks for rendering
   const imageBlocks = message.content.filter(
@@ -319,6 +330,11 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
             </div>
           ) : (
             <div>
+              {/* ── Thinking / reasoning ─────────────────────────────────── */}
+              {displayThinking && (
+                <ThinkingPanel content={displayThinking} isStreaming={isThinkingStreaming} />
+              )}
+
               {/* ── AI-generated image grid ─────────────────────────────── */}
               {galleryImages.length > 0 && (
                 <div style={{

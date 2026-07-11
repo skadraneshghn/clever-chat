@@ -21,6 +21,7 @@ interface ChatState {
   messages: Message[];
   isStreaming: boolean;
   streamingContent: string;
+  streamingThinking: string;
   streamingMessageId: string | null;
   activeNodes: string[];
   totalConversations: number;
@@ -37,6 +38,7 @@ interface ChatState {
   addOptimisticUserMessage: (content: string, conversationId: string, attachments?: PendingAttachment[]) => void;
   setStreamingState: (isStreaming: boolean) => void;
   appendStreamToken: (token: string) => void;
+  appendStreamThinking: (token: string) => void;
   finalizeStreamMessage: (message: Message) => void;
   setStreamingMessageId: (id: string | null) => void;
   addNodeEvent: (node: string) => void;
@@ -80,6 +82,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isStreaming: false,
   streamingContent: '',
+  streamingThinking: '',
   streamingMessageId: null,
   activeNodes: [],
   totalConversations: 0,
@@ -107,7 +110,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setActiveConversation: (id) => {
-    set({ activeConversationId: id, messages: [], streamingContent: '', activeNodes: [] });
+    set({ activeConversationId: id, messages: [], streamingContent: '', streamingThinking: '', activeNodes: [] });
     if (id) {
       get().fetchMessages(id);
     }
@@ -161,10 +164,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  appendStreamThinking: (token) => {
+    set((state) => ({
+      streamingThinking: state.streamingThinking + token,
+    }));
+  },
+
   finalizeStreamMessage: (message) => {
     set((state) => ({
       messages: [...state.messages, message],
       streamingContent: '',
+      streamingThinking: '',
       streamingMessageId: null,
       isStreaming: false,
       activeNodes: [],
@@ -227,6 +237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeConversationId: null,
       messages: [],
       streamingContent: '',
+      streamingThinking: '',
       isStreaming: false,
       activeNodes: [],
       isNewChatMode: true,

@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check, MessageSquare, Bot } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import ThinkingPanel from '@/components/chat/ThinkingPanel';
 
 interface Message {
   id: string;
@@ -207,7 +208,8 @@ export default function SharedConversationPage() {
       }}>
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
-          const textContent = msg.content?.map(c => c.text).join('\n') || '';
+          const thinkingContent = msg.content?.filter(c => c.type === 'thinking').map(c => c.text).join('\n') || '';
+          const textContent = msg.content?.filter(c => c.type !== 'thinking').map(c => c.text).join('\n') || '';
 
           return (
             <div
@@ -267,13 +269,15 @@ export default function SharedConversationPage() {
                 {isUser ? (
                   <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{textContent}</p>
                 ) : (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      code({ className, children, ...props }) {
-                        const match = /language-(\w+)/.exec(className || '');
-                        const code = String(children).replace(/\n$/, '');
-                        if (match) {
+                  <div>
+                    {thinkingContent && <ThinkingPanel content={thinkingContent} />}
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ className, children, ...props }) {
+                          const match = /language-(\w+)/.exec(className || '');
+                          const code = String(children).replace(/\n$/, '');
+                          if (match) {
                           const codeId = `${msg.id}-${match[1]}`;
                           const isCopied = copiedId === codeId;
                           return (
@@ -328,6 +332,7 @@ export default function SharedConversationPage() {
                   >
                     {textContent}
                   </ReactMarkdown>
+                  </div>
                 )}
               </div>
             </div>

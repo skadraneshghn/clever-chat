@@ -405,6 +405,52 @@ body {
   color: var(--text-heading);
 }
 
+/* ── Thinking / Reasoning Panel ─────────────────────────────────────── */
+.thinking-content {
+  line-height: 1.7;
+  word-break: break-word;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+.thinking-content p { margin: 0 0 .65em; }
+.thinking-content p:last-child { margin-bottom: 0; }
+.thinking-content pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.thinking-content code {
+  font-family: 'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  font-size: .85em;
+}
+.thinking-content :not(pre) > code {
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  color: var(--accent-primary);
+}
+.thinking-content ul, .thinking-content ol { padding-left: 1.4em; margin: 6px 0; }
+.thinking-content li { margin: 3px 0; }
+.thinking-content blockquote {
+  border-left: 3px solid var(--accent-primary);
+  padding-left: 12px;
+  margin: 8px 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.thinking-content h1, .thinking-content h2, .thinking-content h3 {
+  margin-top: .8em;
+  margin-bottom: .4em;
+  color: var(--text-heading);
+  font-size: 1em;
+}
+.thinking-content strong { color: var(--text-primary); font-weight: 600; }
+
 /* ── Reduced Motion ─────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

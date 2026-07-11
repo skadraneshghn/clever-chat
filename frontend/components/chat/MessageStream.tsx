@@ -13,7 +13,7 @@ import { useTheme } from 'next-themes';
 import MessageBubble from './MessageBubble';
 
 export default function MessageStream() {
-  const { messages, isStreaming, streamingContent, activeNodes, imageGenerationMode } = useChatStore();
+  const { messages, isStreaming, streamingContent, streamingThinking, activeNodes, imageGenerationMode } = useChatStore();
   const { preferences } = usePreferencesStore();
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -25,7 +25,7 @@ export default function MessageStream() {
     if (bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages.length, streamingContent]);
+  }, [messages.length, streamingContent, streamingThinking]);
 
   // Detect scroll position
   const handleScroll = () => {
@@ -132,7 +132,7 @@ export default function MessageStream() {
           ))}
 
           {/* Streaming message */}
-          {isStreaming && streamingContent && (
+          {isStreaming && (streamingContent || streamingThinking) && (
             <MessageBubble
               key="streaming"
               message={{
@@ -153,6 +153,7 @@ export default function MessageStream() {
               }}
               isStreaming={true}
               streamingContent={streamingContent}
+              streamingThinking={streamingThinking}
               isLast={true}
             />
           )}
@@ -225,7 +226,7 @@ export default function MessageStream() {
           )}
 
           {/* Loading: standard text dot indicator */}
-          {isStreaming && !streamingContent && !imageGenerationMode && !activeNodes.includes('image_generator') && (
+          {isStreaming && !streamingContent && !streamingThinking && !imageGenerationMode && !activeNodes.includes('image_generator') && (
             <motion.div
               key="loading"
               initial={{ opacity: 0, y: 8 }}

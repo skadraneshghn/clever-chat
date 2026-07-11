@@ -264,6 +264,7 @@ async def chat_stream(
         """Async generator yielding SSE events from LangGraph execution."""
         graph = get_compiled_graph()
         full_response = ""
+        full_thinking = ""
         input_tokens = 0
         output_tokens = 0
         ai_message_id = uuid.uuid4()
@@ -324,12 +325,47 @@ async def chat_stream(
                     if kind == "on_chat_model_stream" and not body.image_generation_mode:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and isinstance(chunk, AIMessageChunk):
-                            token = chunk.content
-                            if token:
-                                full_response += token
-                                yield await _sse_event("token", {
-                                    "content": token,
+                            # ── Reasoning / thinking content ──────────────
+                            # OpenAI-compatible reasoning models stream their
+                            # chain-of-thought via a separate "reasoning_content"
+                            # field (DeepSeek, OpenRouter, Nemotron, etc.).
+                            # LangChain surfaces it on additional_kwargs.
+                            reasoning_chunk = ""
+                            additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
+                            reasoning_chunk = additional_kwargs.get("reasoning_content", "") or ""
+                            if not reasoning_chunk:
+                                reasoning_chunk = getattr(chunk, "reasoning_content", None) or ""
+                            # Some providers emit thinking as a typed content block
+                            if not reasoning_chunk and isinstance(chunk.content, list):
+                                for block in chunk.content:
+                                    if isinstance(block, dict) and block.get("type") in ("thinking", "reasoning"):
+                                        reasoning_chunk += block.get("thinking", "") or block.get("text", "") or ""
+
+                            if reasoning_chunk:
+                                full_thinking += reasoning_chunk
+                                yield await _sse_event("thinking", {
+                                    "content": reasoning_chunk,
                                 })
+
+                            # ── Normal answer text ────────────────────────
+                            token = chunk.content
+                            if isinstance(token, str):
+                                if token:
+                                    full_response += token
+                                    yield await _sse_event("token", {
+                                        "content": token,
+                                    })
+                            elif isinstance(token, list):
+                                # Multimodal / block content — extract text parts only
+                                text_parts = ""
+                                for block in token:
+                                    if isinstance(block, dict) and block.get("type") == "text":
+                                        text_parts += block.get("text", "")
+                                if text_parts:
+                                    full_response += text_parts
+                                    yield await _sse_event("token", {
+                                        "content": text_parts,
+                                    })
 
                     # Node execution events
                     elif kind == "on_chain_start":
@@ -400,7 +436,10 @@ async def chat_stream(
                             "asset_id": img["asset_id"],
                         })
                 else:
-                    ai_content = [{"type": "text", "text": full_response}]
+                    ai_content = []
+                    if full_thinking:
+                        ai_content.append({"type": "thinking", "text": full_thinking})
+                    ai_content.append({"type": "text", "text": full_response})
 
                 ai_message = Message(
                     id=ai_message_id,
@@ -441,6 +480,8 @@ async def chat_stream(
             }
             if generated_images:
                 meta_payload["generated_images"] = generated_images
+            if full_thinking:
+                meta_payload["thinking"] = full_thinking
 
             yield await _sse_event("message_meta", meta_payload)
             # Send title update if a new title was generated

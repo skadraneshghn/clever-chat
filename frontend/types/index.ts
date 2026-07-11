@@ -60,7 +60,7 @@ export interface ConversationListResponse {
 // ── Messages ────────────────────────────────────────────────────────────────
 
 export interface ContentBlock {
-  type: 'text' | 'image' | 'image_url' | 'audio' | 'document';
+  type: 'text' | 'image' | 'image_url' | 'audio' | 'document' | 'thinking';
   text?: string;
   asset_id?: string;
   url?: string;
@@ -116,6 +116,7 @@ export interface ShareUser {
 export type SSEEventType =
   | 'message_start'
   | 'token'
+  | 'thinking'
   | 'node_start'
   | 'node_end'
   | 'tool_start'
@@ -125,6 +126,10 @@ export type SSEEventType =
   | 'error';
 
 export interface SSETokenEvent {
+  content: string;
+}
+
+export interface SSEThinkingEvent {
   content: string;
 }
 
@@ -144,6 +149,7 @@ export interface SSEMessageMetaEvent {
   output_tokens: number;
   latency_ms: number;
   model_id: string;
+  thinking?: string;
 }
 
 export interface SSEDoneEvent {

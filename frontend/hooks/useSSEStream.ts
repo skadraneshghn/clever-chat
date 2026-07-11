@@ -21,6 +21,7 @@ export function useSSEStream() {
   }, [pathname]);
   const {
     appendStreamToken,
+    appendStreamThinking,
     setStreamingState,
     setStreamingMessageId,
     finalizeStreamMessage,
@@ -75,6 +76,7 @@ export function useSSEStream() {
       let conversationId = request.conversation_id;
       let messageId = '';
       let fullContent = '';
+      let fullThinking = '';
 
       try {
         await fetchEventSource(`${API_BASE}/api/v1/chat/stream`, {
@@ -117,6 +119,11 @@ export function useSSEStream() {
                 appendStreamToken(data.content);
                 break;
 
+              case 'thinking':
+                fullThinking += data.content;
+                appendStreamThinking(data.content);
+                break;
+
               case 'node_start':
                 addNodeEvent(data.node);
                 break;
@@ -127,6 +134,9 @@ export function useSSEStream() {
 
               case 'message_meta': {
                 // Stream complete — finalize message
+                // Prefer the backend's authoritative thinking text (handles
+                // reconnects / missed events); fall back to locally accumulated.
+                const thinkingText = data.thinking || fullThinking;
                 // If this was an image generation request, build image content blocks
                 const generatedImages: { asset_id: string; url: string; thumbnail_url: string }[] =
                   data.generated_images || [];
@@ -144,7 +154,12 @@ export function useSSEStream() {
                     })),
                   ];
                 } else {
-                  finalContent = [{ type: 'text', text: fullContent }];
+                  finalContent = thinkingText
+                    ? [
+                        { type: 'thinking' as const, text: thinkingText },
+                        { type: 'text' as const, text: fullContent },
+                      ]
+                    : [{ type: 'text' as const, text: fullContent }];
                 }
 
                 const finalMessage: Message = {
@@ -206,6 +221,7 @@ export function useSSEStream() {
     },
     [
       appendStreamToken,
+      appendStreamThinking,
       setStreamingState,
       setStreamingMessageId,
       finalizeStreamMessage,
