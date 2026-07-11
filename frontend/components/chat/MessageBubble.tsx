@@ -77,8 +77,9 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     .map((b: ContentBlock) => b.text || '')
     .join('');
   const displayThinking = isStreaming ? (streamingThinking || '') : persistedThinking;
-  // Thinking tokens are "active" while streaming and no answer text has started yet
-  const isThinkingStreaming = !!isStreaming && !!streamingThinking && !streamingContent;
+  // isThinkingStreaming stays true the ENTIRE stream when thinking content is present,
+  // keeping the ThinkingPanel animated while text tokens are also flowing.
+  const isThinkingStreaming = !!isStreaming && !!streamingThinking;
 
   // Extract image blocks for rendering
   const imageBlocks = message.content.filter(

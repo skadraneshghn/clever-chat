@@ -25,13 +25,14 @@ function formatDuration(seconds: number): string {
 }
 
 export default function ThinkingPanel({ content, isStreaming = false }: ThinkingPanelProps) {
+  // Start expanded whenever streaming; start collapsed for persisted messages
   const [expanded, setExpanded] = useState(isStreaming);
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number | null>(null);
   const prevStreamingRef = useRef(isStreaming);
 
-  // Live elapsed timer while thinking tokens are streaming in
+  // Live elapsed timer — runs as long as isStreaming is true
   useEffect(() => {
     if (!isStreaming) return;
     if (startRef.current === null) startRef.current = Date.now();
@@ -41,11 +42,14 @@ export default function ThinkingPanel({ content, isStreaming = false }: Thinking
     return () => clearInterval(id);
   }, [isStreaming]);
 
-  // Auto-collapse to a compact bar once the thinking phase completes
+  // Auto-collapse ONLY when the full stream completes (isStreaming: true → false)
+  // This keeps the panel open while both thinking AND text tokens are streaming
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
-      setExpanded(false);
+      // Small delay so the user sees the final thinking content before collapse
+      const timer = setTimeout(() => setExpanded(false), 600);
       if (startRef.current) setElapsed((Date.now() - startRef.current) / 1000);
+      return () => clearTimeout(timer);
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);

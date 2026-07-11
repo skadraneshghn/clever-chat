@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { FiArrowDown } from 'react-icons/fi';
+import { Brain, Sparkles } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useTheme } from 'next-themes';
@@ -226,29 +227,90 @@ export default function MessageStream() {
             </motion.div>
           )}
 
-          {/* Loading: standard text dot indicator */}
+          {/* ── Thinking-phase loader: shows while thinking tokens arrive, before text ── */}
+          {isStreaming && streamingThinking && !streamingContent && (
+            <motion.div
+              key="thinking-status"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                display: 'flex', gap: 12, padding: '16px 0',
+                maxWidth: 'var(--max-content-width)', margin: '0 auto',
+                alignItems: 'flex-start',
+              }}
+            >
+              <div style={{
+                width: 32, height: 32,
+                borderRadius: 'var(--radius-pill)',
+                background: 'var(--accent-primary-soft)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--accent-primary)',
+              }}>
+                <motion.div
+                  animate={{ scale: [1, 1.15, 1] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <Brain size={16} />
+                </motion.div>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>CleverChat</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--accent-primary)', fontWeight: 500 }}>Thinking</span>
+                  <span style={{ display: 'inline-flex', gap: 3 }}>
+                    {[0, 1, 2].map((i) => (
+                      <motion.span
+                        key={i}
+                        animate={{ opacity: [0.25, 1, 0.25] }}
+                        transition={{ duration: 1, repeat: Infinity, delay: i * 0.18 }}
+                        style={{
+                          width: 4, height: 4,
+                          borderRadius: 'var(--radius-pill)',
+                          background: 'var(--accent-primary)',
+                          display: 'inline-block',
+                        }}
+                      />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Writing-phase label: shows when text starts arriving after a thinking phase ── */}
+          {isStreaming && streamingThinking && streamingContent && (
+            <motion.div
+              key="writing-status"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 0 12px',
+                maxWidth: 'var(--max-content-width)', margin: '0 auto',
+              }}
+            >
+              <Sparkles size={12} style={{ color: 'var(--accent-primary)' }} />
+              <span style={{ fontSize: 11.5, color: 'var(--accent-primary)', fontWeight: 500 }}>Writing response…</span>
+            </motion.div>
+          )}
+
+          {/* ── Generic dot-loader: fallback for non-thinking models ── */}
           {isStreaming && !streamingContent && !streamingThinking && !imageGenerationMode && !activeNodes.includes('image_generator') && (
             <motion.div
               key="loading"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               style={{
-                display: 'flex',
-                gap: 12,
-                padding: '16px 0',
-                maxWidth: 'var(--max-content-width)',
-                margin: '0 auto',
+                display: 'flex', gap: 12, padding: '16px 0',
+                maxWidth: 'var(--max-content-width)', margin: '0 auto',
                 alignItems: 'flex-start',
               }}
             >
               <div style={{
-                width: 32,
-                height: 32,
+                width: 32, height: 32,
                 borderRadius: 'var(--radius-pill)',
                 background: 'var(--accent-primary-soft)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: 'var(--accent-primary)',
               }}>
                 <motion.div
@@ -259,9 +321,7 @@ export default function MessageStream() {
                 </motion.div>
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>
-                  CleverChat
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 8 }}>CleverChat</div>
                 <div style={{ display: 'flex', gap: 4 }}>
                   {[0, 1, 2].map((i) => (
                     <motion.div
@@ -269,8 +329,7 @@ export default function MessageStream() {
                       animate={{ opacity: [0.3, 1, 0.3] }}
                       transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
                       style={{
-                        width: 6,
-                        height: 6,
+                        width: 6, height: 6,
                         borderRadius: 'var(--radius-pill)',
                         background: 'var(--accent-primary)',
                       }}

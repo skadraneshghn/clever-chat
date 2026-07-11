@@ -35,46 +35,71 @@ async def _sse_event(event: str, data: dict) -> str:
 def _extract_chunk_content(chunk: AIMessageChunk) -> tuple[str, str]:
     """Safely extract (text_token, thinking_token) from an AIMessageChunk.
 
-    Handles all known provider formats:
-    - OpenAI/compatible: content is a plain string
-    - Anthropic extended thinking: content is a list of dicts with type='thinking'|'text'
-    - Some providers return non-dict items (integers, None) inside the content list — these
-      are skipped to prevent the Pydantic 'Input should be a valid string' validation error
-      that occurs when LangGraph tries to accumulate chunks containing invalid types.
-    - Reasoning/thinking content can also live in additional_kwargs.reasoning_content or
-      as a top-level .reasoning_content attribute (DeepSeek R1, QwQ, etc.)
+    Handles all known provider streaming formats:
+
+    1. OpenAI / generic OpenAI-compatible
+       - content is a plain string with the answer text
+
+    2. DeepSeek R1 / QwQ / similar open-weight reasoning models
+       - chunk.content is "" (empty string for thinking chunks)
+       - chunk.additional_kwargs["reasoning_content"] = thinking text
+       - When text reply starts, content becomes a normal string again
+
+    3. Anthropic Claude extended thinking (langchain-anthropic >= 0.3)
+       - content is a list of dicts:
+         [{"type": "thinking", "thinking": "..."}]   (thinking phase)
+         [{"type": "text", "text": "..."}]            (answer phase)
+         [{"type": "redacted_thinking", ...}]         (redacted, skip)
+
+    4. Malformed providers that put integers or None in content list
+       - These are silently skipped (the prior ValidationError bug)
+
+    Returns (text_token, thinking_token) — both may be empty strings.
     """
     text_token = ""
     thinking_token = ""
 
-    # ── Extract thinking/reasoning from extra attributes first ─────────────
+    # ── 1. Check additional_kwargs.reasoning_content (DeepSeek, QwQ) ─────────
     additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-    thinking_token = str(additional_kwargs.get("reasoning_content") or "") or ""
-    if not thinking_token:
-        thinking_token = str(getattr(chunk, "reasoning_content", None) or "") or ""
+    rc = additional_kwargs.get("reasoning_content")
+    if rc and isinstance(rc, str):
+        thinking_token = rc
 
-    # ── Extract text (and more thinking) from content ──────────────────────
-    raw = chunk.content  # type: ignore[attr-defined]
+    # Also check top-level attribute (some langchain wrappers expose it directly)
+    if not thinking_token:
+        rc2 = getattr(chunk, "reasoning_content", None)
+        if rc2 and isinstance(rc2, str):
+            thinking_token = rc2
+
+    # ── 2. Parse chunk.content ────────────────────────────────────────────────
+    raw = getattr(chunk, "content", None)
 
     if isinstance(raw, str):
-        # Simple string — skip if we already found it as thinking
-        text_token = raw
+        if raw and raw != thinking_token:
+            # Non-empty string that isn't already captured as thinking
+            text_token = raw
 
     elif isinstance(raw, list):
         for block in raw:
-            # Guard: skip anything that isn't a dict (e.g., bare integers)
+            # Guard: skip anything that isn't a dict (bare integers, None, etc.)
             if not isinstance(block, dict):
                 continue
             block_type = block.get("type", "")
+
             if block_type == "text":
-                text_token += str(block.get("text") or "")
+                t = block.get("text") or block.get("content") or ""
+                if isinstance(t, str):
+                    text_token += t
+
             elif block_type in ("thinking", "reasoning"):
                 # Anthropic extended thinking
-                val = block.get("thinking") or block.get("text") or ""
-                thinking_token += str(val)
-            # input_json_delta, tool_use, etc. — ignored intentionally
+                t = block.get("thinking") or block.get("text") or block.get("content") or ""
+                if isinstance(t, str):
+                    thinking_token += t
 
-    # Else: int / None / unexpected type — return empty strings (safe fallback)
+            # "redacted_thinking", "tool_use", "input_json_delta" → ignored
+
+    # ── Fallback: int / None / unexpected raw type → return empty (safe) ─────
     return text_token, thinking_token
 
 
