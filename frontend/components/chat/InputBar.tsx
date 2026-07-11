@@ -165,12 +165,29 @@ export default function InputBar({ conversationId }: InputBarProps) {
     imageGenerationMode, imageCount, toggleImageGenerationMode, setImageCount,
     activeChatResourceIds, fetchActiveChatResources, files, fetchFiles, detachResourceFromChat,
     activeConversationId,
-    createConversation,
   } = useChatStore();
   const { sendMessage, stopStream } = useSSEStream();
   const { preferences, updatePreferences, reasoningOnly, setReasoningOnly } = usePreferencesStore();
   const { availableModels } = useProviderStore();
   const effectiveConversationId = conversationId || activeConversationId;
+
+  // Listen for suggestion card events from the home page
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const prompt = (e as CustomEvent<{ prompt: string }>).detail?.prompt;
+      if (prompt) {
+        setMessage(prompt);
+        // Auto-resize textarea
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+          textareaRef.current.focus();
+        }
+      }
+    };
+    window.addEventListener('cleverchat:set-prompt', handler);
+    return () => window.removeEventListener('cleverchat:set-prompt', handler);
+  }, []);
 
   useEffect(() => {
     if (effectiveConversationId) {

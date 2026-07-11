@@ -12,14 +12,16 @@ from app.graph.state import AgentState
 
 
 def _route_after_llm(state: AgentState) -> str:
-    """Conditional routing after LLM response."""
-    finish_reason = state.get("finish_reason", "stop")
+    """Conditional routing after LLM response.
 
-    if finish_reason == "error":
+    Both error and success routes go to response_finalizer.
+    The finalizer passes through state metadata; the SSE endpoint
+    reads finish_reason / error_raised to determine how to persist.
+    """
+    if state.get("error_raised") or state.get("finish_reason") == "error":
         return "response_finalizer"
 
     # Check for tool calls (future: route to tool_executor)
-    # For now, always go to response_finalizer
     return "response_finalizer"
 
 

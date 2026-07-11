@@ -87,9 +87,41 @@ export interface Message {
   sender_id: string | null;
   sender_username: string | null;
   hidden_from_owner: boolean;
+  /** Tracks LLM execution lifecycle for this message */
+  execution_status?: 'pending' | 'streaming' | 'completed' | 'failed';
+  /** Version number — incremented on each edit/fork */
+  version?: number;
 }
 
 // ── Chat Stream ─────────────────────────────────────────────────────────────
+
+export interface ConversationInitRequest {
+  message: string;
+  model_id?: string;
+  system_prompt?: string;
+  temperature?: number;
+  max_tokens?: number;
+  media_asset_ids?: string[];
+  hidden_from_owner?: boolean;
+  image_generation_mode?: boolean;
+  image_n?: 1 | 2 | 4;
+}
+
+export interface ConversationInitResponse {
+  id: string;
+  title: string;
+  model_id: string;
+  user_message_id: string;
+  created_at: string;
+}
+
+export interface MessageEditRequest {
+  message: string;
+  model_id?: string;
+  media_asset_ids?: string[];
+  temperature?: number;
+  max_tokens?: number;
+}
 
 export interface ChatStreamRequest {
   conversation_id?: string | null;
@@ -99,6 +131,8 @@ export interface ChatStreamRequest {
   max_tokens?: number;
   system_prompt?: string;
   parent_message_id?: string | null;
+  /** Set when retrying a failed message — points to existing user message */
+  leaf_user_message_id?: string | null;
   media_asset_ids?: string[];
   hidden_from_owner?: boolean;
   image_generation_mode?: boolean;

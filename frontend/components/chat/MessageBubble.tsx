@@ -4,21 +4,22 @@
    MessageBubble — User & AI chat messages with markdown rendering
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   FiCopy, FiCheck, FiRefreshCw, FiEdit3, FiThumbsUp,
-  FiThumbsDown, FiShare2, FiMoreHorizontal, FiEye, FiEyeOff,
-  FiFileText, FiMusic, FiVideo, FiDownload,
+  FiThumbsDown, FiShare2, FiEye, FiEyeOff,
+  FiFileText, FiMusic, FiVideo, FiDownload, FiX, FiAlertTriangle,
 } from 'react-icons/fi';
 import { RiRobot2Line, RiUser3Line } from 'react-icons/ri';
 import { messageAppear } from '@/lib/motion';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useSSEStream } from '@/hooks/useSSEStream';
 import { toast } from 'sonner';
 import type { Message, ContentBlock } from '@/types';
 import { ImageGallery, type GalleryImage } from './ImageGallery';
@@ -37,10 +38,15 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
   const [copied, setCopied] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState<number | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
   const isUser = message.role === 'user';
+  const isFailed = message.execution_status === 'failed';
 
   const { conversations, toggleMessageVisibility } = useChatStore();
   const { user } = useAuthStore();
+  const { retryMessage } = useSSEStream();
+  const { isStreaming: globalIsStreaming } = useChatStore();
 
   const activeConv = conversations.find((c) => c.id === message.conversation_id);
   const isShared = activeConv?.is_shared || false;
@@ -56,6 +62,13 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     .filter((b: ContentBlock) => b.type === 'text')
     .map((b: ContentBlock) => b.text || '')
     .join('');
+
+  // Extract error content for failed messages
+  const errorContent = message.content
+    .filter((b: ContentBlock) => (b as any).type === 'error')
+    .map((b: ContentBlock) => b.text || '')
+    .join('');
+
   const displayContent = isStreaming ? (streamingContent || '') : textContent;
 
   // Extract thinking / reasoning content (persisted on AI messages)
@@ -96,6 +109,65 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleStartEdit = () => {
+    setEditText(textContent);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditText('');
+  };
+
+  const handleSubmitEdit = useCallback(async () => {
+    const trimmed = editText.trim();
+    if (!trimmed || trimmed === textContent) {
+      setIsEditing(false);
+      return;
+    }
+    setIsEditing(false);
+    // Call the edit endpoint via SSE
+    try {
+      const token = localStorage.getItem('access_token');
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
+      const response = await fetch(`${API_BASE}/api/v1/chat/messages/${message.id}/edit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: trimmed }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.detail || 'Failed to edit message');
+      } else {
+        // Refresh messages after edit
+        const { fetchMessages, activeConversationId } = useChatStore.getState();
+        if (activeConversationId) fetchMessages(activeConversationId);
+      }
+    } catch (err) {
+      toast.error('Failed to edit message');
+    }
+  }, [editText, textContent, message.id]);
+
+  const handleRetry = useCallback(async () => {
+    // Find the preceding user message to retry from
+    const { messages } = useChatStore.getState();
+    const msgIndex = messages.findIndex((m) => m.id === message.id);
+    // The user message is typically right before the AI message
+    const userMsg = msgIndex > 0 ? messages[msgIndex - 1] : null;
+    if (!userMsg || userMsg.role !== 'user') {
+      toast.error('Cannot find the original user message to retry');
+      return;
+    }
+    await retryMessage(
+      message.conversation_id,
+      userMsg.id,
+      message.model_id || undefined,
+    );
+  }, [message, retryMessage]);
 
   return (
     <motion.div
@@ -181,6 +253,77 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
 
         {/* Message body */}
         <div className={`message-content ${isStreaming && isLast ? 'streaming-cursor' : ''}`} dir="auto">
+          {/* ── Error Recovery Widget (failed AI messages) ──────────── */}
+          {isFailed && !isUser && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                background: 'linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.04))',
+                border: '1px solid rgba(239,68,68,0.25)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '14px 16px',
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                <FiAlertTriangle size={16} style={{ color: '#ef4444', flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#ef4444', marginBottom: 3 }}>
+                    The model encountered an error
+                  </div>
+                  {errorContent && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      {errorContent}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleRetry}
+                  disabled={globalIsStreaming}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px',
+                    background: globalIsStreaming ? 'var(--surface-1)' : 'var(--accent-primary)',
+                    color: globalIsStreaming ? 'var(--text-muted)' : 'white',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: globalIsStreaming ? 'not-allowed' : 'pointer',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <FiRefreshCw size={13} />
+                  Retry
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(errorContent);
+                    toast.success('Error message copied');
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px',
+                    background: 'var(--surface-1)',
+                    color: 'var(--text-secondary)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'pointer',
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <FiCopy size={13} />
+                  Copy Error
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           {isUser ? (
             <div>
               {/* Attached images */}
@@ -324,8 +467,60 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
                   })}
                 </div>
               )}
-              {displayContent && (
-                <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{displayContent}</p>
+              {/* Inline edit mode for user messages */}
+              {isEditing ? (
+                <div style={{ marginTop: 4 }}>
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    autoFocus
+                    rows={3}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: 'var(--bg-secondary)',
+                      border: '1.5px solid var(--accent-primary)',
+                      borderRadius: 'var(--radius-md)',
+                      color: 'var(--text-primary)',
+                      fontSize: 14,
+                      lineHeight: 1.6,
+                      resize: 'vertical',
+                      outline: 'none',
+                      fontFamily: 'inherit',
+                      minHeight: 60,
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitEdit(); }
+                      if (e.key === 'Escape') handleCancelEdit();
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    <button
+                      onClick={handleSubmitEdit}
+                      style={{
+                        padding: '5px 12px', background: 'var(--accent-primary)', color: 'white',
+                        border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                        fontSize: 12.5, fontWeight: 600,
+                      }}
+                    >
+                      Save & Resend
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      style={{
+                        padding: '5px 12px', background: 'var(--surface-1)', color: 'var(--text-secondary)',
+                        border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+                        cursor: 'pointer', fontSize: 12.5,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                displayContent && (
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }} dir="auto">{displayContent}</p>
+                )
               )}
             </div>
           ) : (
@@ -541,8 +736,8 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
           </div>
         )}
 
-        {/* Action bar */}
-        {!isUser && !isStreaming && hovering && (
+        {/* Action bar for AI messages */}
+        {!isUser && !isStreaming && !isFailed && hovering && (
           <motion.div
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -554,15 +749,15 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
           >
             {[
               { icon: copied ? <FiCheck size={14} /> : <FiCopy size={14} />, title: 'Copy', onClick: handleCopy },
-              { icon: <FiRefreshCw size={14} />, title: 'Regenerate', onClick: () => {} },
+              { icon: <FiRefreshCw size={14} />, title: 'Regenerate', onClick: handleRetry },
               { icon: <FiThumbsUp size={14} />, title: 'Good', onClick: () => {} },
               { icon: <FiThumbsDown size={14} />, title: 'Bad', onClick: () => {} },
-              { icon: <FiShare2 size={14} />, title: 'Share', onClick: () => {} },
             ].map((action) => (
               <button
                 key={action.title}
                 onClick={action.onClick}
                 title={action.title}
+                disabled={globalIsStreaming && action.title === 'Regenerate'}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -572,13 +767,16 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
                   borderRadius: 'var(--radius-sm)',
                   background: 'transparent',
                   border: 'none',
-                  cursor: 'pointer',
+                  cursor: (globalIsStreaming && action.title === 'Regenerate') ? 'not-allowed' : 'pointer',
                   color: 'var(--text-muted)',
                   transition: 'all var(--transition-fast)',
+                  opacity: (globalIsStreaming && action.title === 'Regenerate') ? 0.4 : 1,
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--surface-1)';
-                  e.currentTarget.style.color = 'var(--text-primary)';
+                  if (!(globalIsStreaming && action.title === 'Regenerate')) {
+                    e.currentTarget.style.background = 'var(--surface-1)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = 'transparent';
@@ -591,8 +789,8 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
           </motion.div>
         )}
 
-        {/* Action bar for user messages inside shared chats */}
-        {isUser && isShared && message.sender_id === user?.id && !isStreaming && hovering && (
+        {/* Action bar for user messages — edit + share */}
+        {isUser && !isStreaming && !isEditing && hovering && (
           <motion.div
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -603,39 +801,77 @@ export default function MessageBubble({ message, isStreaming, streamingContent, 
               alignItems: 'center',
             }}
           >
+            {/* Edit button */}
             <button
-              onClick={async () => {
-                try {
-                  await toggleMessageVisibility(message.id);
-                  toast.success(!message.hidden_from_owner ? 'Message is now hidden from the owner.' : 'Message is now visible to the owner.');
-                } catch (e) {
-                  toast.error('Failed to toggle visibility.');
-                }
-              }}
+              onClick={handleStartEdit}
+              title="Edit message"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
+                display: 'flex', alignItems: 'center', gap: 5,
                 padding: '4px 8px',
                 borderRadius: 'var(--radius-md)',
                 background: 'var(--surface-1)',
                 border: '1px solid var(--border-default)',
                 cursor: 'pointer',
-                fontSize: 11.5,
-                fontWeight: 500,
-                color: message.hidden_from_owner ? 'var(--accent-error)' : 'var(--text-secondary)',
+                fontSize: 11.5, fontWeight: 500,
+                color: 'var(--text-secondary)',
                 transition: 'all var(--transition-fast)',
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-2)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--surface-1)';
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
             >
-              {message.hidden_from_owner ? <FiEye size={13} /> : <FiEyeOff size={13} />}
-              <span>{message.hidden_from_owner ? 'Show to Owner' : 'Hide from Owner'}</span>
+              <FiEdit3 size={13} />
+              <span>Edit</span>
             </button>
+
+            {/* Copy button */}
+            <button
+              onClick={handleCopy}
+              title="Copy message"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 28, height: 28,
+                borderRadius: 'var(--radius-sm)',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                transition: 'all var(--transition-fast)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+            >
+              {copied ? <FiCheck size={13} /> : <FiCopy size={13} />}
+            </button>
+
+            {/* Hide from owner (shared chats only) */}
+            {isShared && message.sender_id === user?.id && (
+              <button
+                onClick={async () => {
+                  try {
+                    await toggleMessageVisibility(message.id);
+                    toast.success(!message.hidden_from_owner ? 'Message is now hidden from the owner.' : 'Message is now visible to the owner.');
+                  } catch (e) {
+                    toast.error('Failed to toggle visibility.');
+                  }
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 8px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--border-default)',
+                  cursor: 'pointer',
+                  fontSize: 11.5, fontWeight: 500,
+                  color: message.hidden_from_owner ? 'var(--accent-error)' : 'var(--text-secondary)',
+                  transition: 'all var(--transition-fast)',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
+              >
+                {message.hidden_from_owner ? <FiEye size={13} /> : <FiEyeOff size={13} />}
+                <span>{message.hidden_from_owner ? 'Show to Owner' : 'Hide from Owner'}</span>
+              </button>
+            )}
           </motion.div>
         )}
       </div>

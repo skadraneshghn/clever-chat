@@ -209,6 +209,7 @@ async def llm_caller(state: AgentState) -> dict:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "finish_reason": "stop",
+            "error_raised": False,
         }
     except Exception as e:
         logger.error("llm_call_failed", error=str(e), model_id=model_id)
@@ -230,7 +231,6 @@ async def llm_caller(state: AgentState) -> dict:
                 async with get_db_context() as session:
                     if user_id:
                         user_uuid = uuid_mod.UUID(user_id) if isinstance(user_id, str) else user_id
-                        # Get connection IDs for this user
                         subq = (
                             select(ProviderConnection.id)
                             .where(ProviderConnection.user_id == user_uuid)
@@ -250,13 +250,19 @@ async def llm_caller(state: AgentState) -> dict:
             except Exception as db_exc:
                 logger.error("failed_to_auto_deactivate_model", error=str(db_exc))
 
-            friendly_message = f"The selected model is not available or authorized for your provider account. We have automatically deactivated it from your list. Please select another model."
+            friendly_message = (
+                "The selected model is not available or authorized for your provider account. "
+                "We have automatically deactivated it from your list. Please select another model."
+            )
         else:
             friendly_message = error_msg
 
+        # Return error state gracefully — graph continues to response_finalizer
+        # which passes the error through to the SSE endpoint.
         return {
             "finish_reason": "error",
             "error_message": friendly_message,
+            "error_raised": True,
         }
 
 

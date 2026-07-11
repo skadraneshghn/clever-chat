@@ -165,6 +165,32 @@ async def lifespan(app: FastAPI):
                     "updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
                 )
             )
+            # ── New columns: messages table ──────────────────────────────────
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                    "execution_status VARCHAR(16) NOT NULL DEFAULT 'completed'"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                    "version INTEGER NOT NULL DEFAULT 1"
+                )
+            )
+            # ── New columns: conversations table ─────────────────────────────
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS "
+                    "status VARCHAR(16) NOT NULL DEFAULT 'active'"
+                )
+            )
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS "
+                    "title_generated BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
         logger.info("database_tables_created")
     except Exception as exc:
         logger.error("database_setup_failed", error=str(exc))

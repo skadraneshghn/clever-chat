@@ -55,12 +55,10 @@ export default function HomePage() {
   const { resetChat } = useChatStore();
 
   // Always start clean when landing on the new-chat home page.
-  // This prevents ConversationPage's useEffect from restoring the previous conversation
-  // by setting isNewChatMode=true via resetChat().
   useEffect(() => {
     resetChat();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally run only once on mount
+  }, []);
 
   function getGreeting() {
     const h = new Date().getHours();
@@ -70,6 +68,15 @@ export default function HomePage() {
   }
 
   const firstName = user?.username || 'there';
+
+  /**
+   * Populates the InputBar textarea with a suggestion prompt.
+   * Dispatches a custom event that InputBar listens for.
+   */
+  function handleSuggestion(prompt: string) {
+    const event = new CustomEvent('cleverchat:set-prompt', { detail: { prompt } });
+    window.dispatchEvent(event);
+  }
 
   return (
     <div style={{
@@ -159,7 +166,7 @@ export default function HomePage() {
             <motion.button
               key={card.title}
               variants={fadeInUp}
-              onClick={() => {}}
+            onClick={() => handleSuggestion(card.prompt)}
               style={{
                 background: 'var(--bg-card)',
                 border: '1px solid rgba(0, 0, 0, 0.05)',

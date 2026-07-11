@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
     ConversationCreate,
+    ConversationInitSchema,
+    ConversationInitResponse,
     ConversationListResponse,
     ConversationResponse,
     ConversationUpdate,
@@ -156,6 +158,76 @@ async def create_conversation(
     return _conv_to_response(conv, current_user_id=user.id)
 
 
+@router.post("/initialize", response_model=ConversationInitResponse, status_code=status.HTTP_201_CREATED)
+async def initialize_conversation(
+    body: ConversationInitSchema,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Instant Handshake endpoint — creates a conversation + user message atomically.
+
+    This is the ONLY correct way to start a new conversation. The client
+    must call this endpoint FIRST, get the conversation_id back in ~10ms,
+    immediately redirect to /{conv_id}, and THEN open the SSE stream at
+    POST /chat/stream with the known conversation_id.
+
+    This pattern decouples session creation from LLM execution:
+    - If the LLM fails, the chat exists and shows an error recovery UI.
+    - If the user navigates away, the conversation is persisted with the prompt.
+    - Two chats can never collide because each has a UUID before inference starts.
+    """
+    from app.models.message import Message
+    from app.core.config import get_settings
+
+    settings = get_settings()
+
+    # 1. Create conversation shell instantly
+    conv = Conversation(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        title="New Chat",
+        model_id=body.model_id or settings.DEFAULT_MODEL_ID,
+        system_prompt=body.system_prompt,
+        status="active",
+        title_generated=False,
+    )
+    db.add(conv)
+    await db.flush()
+
+    # 2. Persist the user's first message immediately (execution_status='completed' for user msgs)
+    content_blocks: list[dict] = [{"type": "text", "text": body.message}]
+    user_message = Message(
+        id=uuid.uuid4(),
+        conversation_id=conv.id,
+        role="user",
+        content=content_blocks,
+        sender_id=user.id,
+        hidden_from_owner=body.hidden_from_owner,
+        execution_status="completed",  # User messages are always immediately complete
+    )
+    db.add(user_message)
+    await db.flush()
+
+    # 3. Commit both rows atomically — client can now redirect immediately
+    await db.commit()
+    await db.refresh(conv)
+
+    logger.info(
+        "conversation_initialized",
+        conv_id=str(conv.id),
+        user_id=str(user.id),
+        model_id=conv.model_id,
+    )
+
+    return ConversationInitResponse(
+        id=conv.id,
+        title=conv.title,
+        model_id=conv.model_id,
+        user_message_id=user_message.id,
+        created_at=conv.created_at,
+    )
+
+
 @router.get("/{conv_id}", response_model=ConversationResponse)
 async def get_conversation(
     conv_id: uuid.UUID,
@@ -256,6 +328,88 @@ async def delete_conversation(
     
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{conv_id}/duplicate", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_conversation(
+    conv_id: uuid.UUID,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deep-copy a conversation's active branch into a new conversation owned by the user."""
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(Conversation)
+        .options(selectinload(Conversation.user))
+        .where(Conversation.id == conv_id, Conversation.user_id == user.id)
+    )
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Create the new conversation shell
+    new_conv = Conversation(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        title=f"{source.title} (Copy)",
+        model_id=source.model_id,
+        system_prompt=source.system_prompt,
+        status="active",
+        title_generated=source.title_generated,
+    )
+    db.add(new_conv)
+    await db.flush()
+
+    # Fetch active-branch messages in chronological order
+    msg_result = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv_id,
+            Message.is_active_branch == True,
+            Message.hidden_from_owner == False,
+        )
+        .order_by(Message.created_at)
+    )
+    source_messages = msg_result.scalars().all()
+
+    # Remap old IDs → new IDs while preserving the parent_id tree structure
+    id_map: dict[uuid.UUID, uuid.UUID] = {}
+    for msg in source_messages:
+        id_map[msg.id] = uuid.uuid4()
+
+    for msg in source_messages:
+        new_parent_id = id_map.get(msg.parent_message_id) if msg.parent_message_id else None
+        new_msg = Message(
+            id=id_map[msg.id],
+            conversation_id=new_conv.id,
+            parent_message_id=new_parent_id,
+            role=msg.role,
+            content=msg.content,
+            model_id=msg.model_id,
+            input_tokens=msg.input_tokens,
+            output_tokens=msg.output_tokens,
+            latency_ms=msg.latency_ms,
+            is_active_branch=True,
+            execution_status=msg.execution_status,
+            hidden_from_owner=False,
+            created_at=msg.created_at,
+        )
+        db.add(new_msg)
+
+    await db.flush()
+    await db.refresh(new_conv, ["user"])
+
+    # Count messages for response
+    msg_count = len(source_messages)
+    logger.info(
+        "conversation_duplicated",
+        source_id=str(conv_id),
+        new_id=str(new_conv.id),
+        message_count=msg_count,
+    )
+
+    return _conv_to_response(new_conv, msg_count, current_user_id=user.id)
 
 
 # ── Sharing ──────────────────────────────────────────────────────────────────

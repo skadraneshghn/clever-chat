@@ -28,6 +28,12 @@ class Conversation(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    # Lifecycle status — 'active' (default) or 'archived'
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", server_default="active"
+    )
+    # Prevents duplicate title-generation API calls on first exchange
+    title_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
         server_default=func.now(),

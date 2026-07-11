@@ -40,6 +40,13 @@ class Message(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
     )
     hidden_from_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Tracks LLM execution lifecycle: pending → streaming → completed | failed
+    execution_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="completed",
+        server_default="completed",
+    )
+    # Incremented on each edit/fork of this message (for branch navigation)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC),
         server_default=func.now(),
@@ -51,7 +58,7 @@ class Message(Base):
     sender = relationship("User", foreign_keys=[sender_id])
 
     def __repr__(self) -> str:
-        return f"<Message {self.id} role={self.role}>"
+        return f"<Message {self.id} role={self.role} status={self.execution_status}>"
 
     @property
     def text_content(self) -> str:

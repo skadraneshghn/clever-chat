@@ -9,14 +9,15 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from langchain_core.messages import AIMessageChunk, HumanMessage
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import ChatStreamRequest, MessageResponse
+from app.api.schemas import ChatStreamRequest, MessageEditRequest, MessageResponse
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.locks import acquire_conversation_lock, release_conversation_lock
 from app.core.security import get_current_user
 from app.graph.builder import get_compiled_graph
 from app.models.conversation import Conversation
@@ -31,6 +32,28 @@ async def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _message_to_response(msg: Message, sender_username: str | None = None) -> MessageResponse:
+    """Convert a Message ORM object to MessageResponse schema."""
+    return MessageResponse(
+        id=msg.id,
+        conversation_id=msg.conversation_id,
+        parent_message_id=msg.parent_message_id,
+        role=msg.role,
+        content=msg.content if isinstance(msg.content, list) else [msg.content],
+        model_id=msg.model_id,
+        input_tokens=msg.input_tokens,
+        output_tokens=msg.output_tokens,
+        latency_ms=msg.latency_ms,
+        is_active_branch=msg.is_active_branch,
+        created_at=msg.created_at,
+        sender_id=msg.sender_id,
+        sender_username=sender_username,
+        hidden_from_owner=msg.hidden_from_owner,
+        execution_status=msg.execution_status,
+        version=msg.version,
+    )
+
+
 @router.post("/stream")
 async def chat_stream(
     body: ChatStreamRequest,
@@ -38,49 +61,77 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """Stream chat response via Server-Sent Events.
-    
-    Creates or continues a conversation, runs the LangGraph agent,
-    and streams tokens back as SSE events.
+
+    IMPORTANT: The conversation MUST already exist (created via POST /conversations/initialize
+    or any prior request). If conversation_id is None this endpoint returns HTTP 400.
+
+    Flow:
+    1. Validate conversation access
+    2. If leaf_user_message_id is set (retry/edit re-run), use that message as the prompt
+    3. Otherwise, save the new user message immediately with execution_status='completed'
+    4. Create a placeholder AI message with execution_status='streaming'
+    5. Run LangGraph pipeline, stream tokens via SSE
+    6. On completion: update AI message to execution_status='completed'
+    7. On error: update AI message to execution_status='failed', stream error event
     """
     settings = get_settings()
     start_time = time.monotonic()
 
-    # Get or create conversation
-    if body.conversation_id:
-        from app.models.conversation_share import ConversationShare
-        result = await db.execute(
-            select(Conversation).where(
-                (Conversation.id == body.conversation_id) &
-                ((Conversation.user_id == user.id) |
-                 Conversation.id.in_(
-                     select(ConversationShare.conversation_id).where(ConversationShare.user_id == user.id)
-                 ))
+    # ── Validate conversation_id ─────────────────────────────────────────────
+    if not body.conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="conversation_id is required. Call POST /conversations/initialize first.",
+        )
+
+    # ── Load and authorize conversation ─────────────────────────────────────
+    from app.models.conversation_share import ConversationShare
+    result = await db.execute(
+        select(Conversation).where(
+            (Conversation.id == body.conversation_id) &
+            ((Conversation.user_id == user.id) |
+             Conversation.id.in_(
+                 select(ConversationShare.conversation_id).where(ConversationShare.user_id == user.id)
+             ))
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # ── Acquire per-conversation lock (prevents double-stream) ───────────────
+    conv_id_str = str(conversation.id)
+    if not await acquire_conversation_lock(conv_id_str):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="A response is already being generated for this conversation. Please wait.",
+        )
+
+    # ── Resolve user message ─────────────────────────────────────────────────
+    # If leaf_user_message_id is set, this is a retry/edit re-run — use existing message.
+    # Otherwise, save the incoming message text as a new user message.
+    if body.leaf_user_message_id:
+        # Retry or re-stream: fetch the existing user message
+        existing_result = await db.execute(
+            select(Message).where(
+                Message.id == body.leaf_user_message_id,
+                Message.conversation_id == conversation.id,
             )
         )
-        conversation = result.scalar_one_or_none()
-        if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+        user_message = existing_result.scalar_one_or_none()
+        if not user_message:
+            release_conversation_lock(conv_id_str)
+            raise HTTPException(status_code=404, detail="User message not found")
     else:
-        conversation = Conversation(
-            user_id=user.id,
-            title="New Chat",
-            model_id=body.model_id or settings.DEFAULT_MODEL_ID,
-            system_prompt=body.system_prompt,
-        )
-        db.add(conversation)
-        await db.flush()
+        # Standard new-message path: build multimodal content blocks
+        content_blocks: list[dict] = [{"type": "text", "text": body.message}]
 
-    # Save user message — build multimodal content blocks if images are attached
-    content_blocks: list[dict] = [{"type": "text", "text": body.message}]
+        # Resolve attached media assets
+        media_refs = []
+        from app.models.media_asset import MediaAsset
+        from app.models.chat_resource import ChatResource
 
-    # Resolve attached media assets (images, documents, sheets, audio, etc.)
-    media_refs = []
-    from app.models.media_asset import MediaAsset
-    from app.models.chat_resource import ChatResource
-
-    # Resolve all asset IDs (combine explicitly passed ones and already attached ones)
-    resolved_ids = list(body.media_asset_ids)
-    if conversation.id:
+        resolved_ids = list(body.media_asset_ids)
         res_ids_query = await db.execute(
             select(ChatResource.media_asset_id).where(
                 ChatResource.conversation_id == conversation.id,
@@ -91,75 +142,90 @@ async def chat_stream(
             if rid not in resolved_ids:
                 resolved_ids.append(rid)
 
-    # Save join bindings for newly sent assets
-    if body.media_asset_ids:
-        for asset_id in body.media_asset_ids:
-            dup = await db.execute(
-                select(ChatResource).where(
-                    ChatResource.conversation_id == conversation.id,
-                    ChatResource.media_asset_id == asset_id
+        if body.media_asset_ids:
+            for asset_id in body.media_asset_ids:
+                dup = await db.execute(
+                    select(ChatResource).where(
+                        ChatResource.conversation_id == conversation.id,
+                        ChatResource.media_asset_id == asset_id
+                    )
+                )
+                if not dup.scalar_one_or_none():
+                    db.add(ChatResource(
+                        conversation_id=conversation.id,
+                        media_asset_id=asset_id,
+                        is_active=True
+                    ))
+            await db.flush()
+
+        if resolved_ids:
+            asset_result = await db.execute(
+                select(MediaAsset).where(
+                    MediaAsset.id.in_(resolved_ids),
+                    MediaAsset.user_id == user.id,
                 )
             )
-            if not dup.scalar_one_or_none():
-                db.add(ChatResource(
-                    conversation_id=conversation.id,
-                    media_asset_id=asset_id,
-                    is_active=True
-                ))
+            all_assets = asset_result.scalars().all()
+            for asset in all_assets:
+                asset_type = "image" if asset.mime_type.startswith("image/") else (
+                    "audio" if asset.mime_type.startswith("audio/") else (
+                        "video" if asset.mime_type.startswith("video/") else "document"
+                    )
+                )
+                media_refs.append({
+                    "id": str(asset.id),
+                    "type": asset_type,
+                    "filename": asset.original_filename,
+                    "mime_type": asset.mime_type,
+                    "url": f"/api/v1/media/{asset.id}",
+                    "extracted_text": asset.extracted_text,
+                    "transcription": asset.transcription,
+                    "token_count": asset.token_count,
+                })
+
+                if asset.mime_type.startswith("image/"):
+                    content_blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"/api/v1/media/{asset.id}"},
+                        "asset_id": str(asset.id),
+                    })
+                else:
+                    content_blocks.append({
+                        "type": asset_type,
+                        "asset_id": str(asset.id),
+                        "url": f"/api/v1/media/{asset.id}",
+                        "mime_type": asset.mime_type,
+                        "text": asset.original_filename,
+                    })
+
+        user_message = Message(
+            conversation_id=conversation.id,
+            parent_message_id=body.parent_message_id,
+            role="user",
+            content=content_blocks,
+            sender_id=user.id,
+            hidden_from_owner=body.hidden_from_owner,
+            execution_status="completed",  # User messages are always immediately complete
+        )
+        db.add(user_message)
         await db.flush()
 
-    if resolved_ids:
-        asset_result = await db.execute(
-            select(MediaAsset).where(
-                MediaAsset.id.in_(resolved_ids),
-                MediaAsset.user_id == user.id,
-            )
-        )
-        all_assets = asset_result.scalars().all()
-        for asset in all_assets:
-            asset_type = "image" if asset.mime_type.startswith("image/") else (
-                "audio" if asset.mime_type.startswith("audio/") else (
-                    "video" if asset.mime_type.startswith("video/") else "document"
-                )
-            )
-            media_refs.append({
-                "id": str(asset.id),
-                "type": asset_type,
-                "filename": asset.original_filename,
-                "mime_type": asset.mime_type,
-                "url": f"/api/v1/media/{asset.id}",
-                "extracted_text": asset.extracted_text,
-                "transcription": asset.transcription,
-                "token_count": asset.token_count,
-            })
-            
-            if asset.mime_type.startswith("image/"):
-                content_blocks.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"/api/v1/media/{asset.id}"},
-                    "asset_id": str(asset.id),
-                })
-            else:
-                content_blocks.append({
-                    "type": asset_type,
-                    "asset_id": str(asset.id),
-                    "url": f"/api/v1/media/{asset.id}",
-                    "mime_type": asset.mime_type,
-                    "text": asset.original_filename,
-                })
-
-    user_message = Message(
+    # ── Pre-create AI message placeholder with execution_status='streaming' ──
+    ai_message_id = uuid.uuid4()
+    ai_message_placeholder = Message(
+        id=ai_message_id,
         conversation_id=conversation.id,
-        parent_message_id=body.parent_message_id,
-        role="user",
-        content=content_blocks,
-        sender_id=user.id,
-        hidden_from_owner=body.hidden_from_owner,
+        parent_message_id=user_message.id,
+        role="assistant",
+        content=[{"type": "text", "text": ""}],  # Empty placeholder
+        model_id=body.model_id or conversation.model_id or settings.DEFAULT_MODEL_ID,
+        sender_id=user_message.sender_id,
+        hidden_from_owner=user_message.hidden_from_owner,
+        execution_status="streaming",  # Critical: signals to UI that response is live
     )
-    db.add(user_message)
-    await db.flush()
+    db.add(ai_message_placeholder)
 
-    # Load conversation history
+    # ── Load conversation history for LangGraph ──────────────────────────────
     is_owner = conversation.user_id == user.id
     if is_owner:
         msg_filter = (Message.hidden_from_owner == False)
@@ -180,34 +246,29 @@ async def chat_stream(
     # Convert to LangChain messages (supports multimodal content blocks)
     lc_messages = []
     for msg in history_messages:
+        if msg.id == ai_message_id:
+            continue  # Skip the placeholder we just created
         if msg.role == "user":
-            # Build multimodal content list if there are image blocks
             blocks = msg.content if isinstance(msg.content, list) else [{"type": "text", "text": str(msg.content)}]
             has_images = any(b.get("type") == "image_url" for b in blocks)
             if has_images:
-                # Build list-content for vision: [{"type": "text", ...}, {"type": "image_url", ...}]
                 lc_content = []
                 for block in blocks:
                     if block.get("type") == "text":
                         lc_content.append({"type": "text", "text": block.get("text", "")})
                     elif block.get("type") == "image_url":
                         img_url = block["image_url"]["url"]
-                        # Convert relative URL to absolute for the LLM to fetch
                         if img_url.startswith("/"):
                             from app.core.config import get_settings as _gs
                             _s = _gs()
                             base = getattr(_s, 'PUBLIC_BASE_URL', '').rstrip('/') or ""
                             asset_id = block.get("asset_id", "")
                             if asset_id and base:
-                                # Use absolute URL if configured
                                 img_url = f"{base}{img_url}"
                             elif asset_id:
-                                # Fallback: encode image as base64 data-URI
                                 try:
                                     import base64
                                     from pathlib import Path as _Path
-                                    from app.core.config import get_settings as _gs2
-                                    _s2 = _gs2()
                                     import uuid as _uuid
                                     asset_uuid = _uuid.UUID(asset_id)
                                     from app.models.media_asset import MediaAsset as _MA
@@ -216,7 +277,7 @@ async def chat_stream(
                                     _asset = _ar.scalar_one_or_none()
                                     if _asset:
                                         ext = _Path(_asset.original_filename).suffix.lower()
-                                        fp = _s2.upload_path / str(_asset.user_id) / f"{_asset.id}{ext}"
+                                        fp = _s.upload_path / str(_asset.user_id) / f"{_asset.id}{ext}"
                                         if fp.exists():
                                             raw = fp.read_bytes()
                                             b64 = base64.b64encode(raw).decode()
@@ -229,9 +290,12 @@ async def chat_stream(
                 lc_messages.append(HumanMessage(content=msg.text_content))
         elif msg.role == "assistant":
             from langchain_core.messages import AIMessage
-            lc_messages.append(AIMessage(content=msg.text_content))
+            # Skip failed/empty assistant messages from history
+            if msg.execution_status not in ("failed",) and msg.text_content:
+                lc_messages.append(AIMessage(content=msg.text_content))
 
     # Build graph input
+    media_refs = locals().get("media_refs", [])
     graph_input = {
         "messages": lc_messages,
         "thread_id": str(conversation.id),
@@ -251,13 +315,13 @@ async def chat_stream(
         "output_tokens": 0,
         "finish_reason": "",
         "error_message": "",
-        # Image generation
+        "error_raised": False,
         "image_generation_mode": body.image_generation_mode,
         "image_n": body.image_n,
         "generated_image_assets": [],
     }
 
-    # Commit the user message before streaming
+    # Commit user message + streaming placeholder before opening SSE
     await db.commit()
 
     async def event_generator():
@@ -267,28 +331,18 @@ async def chat_stream(
         full_thinking = ""
         input_tokens = 0
         output_tokens = 0
-        ai_message_id = uuid.uuid4()
 
         try:
-            # Send conversation metadata
+            # Send conversation + message metadata to client for immediate UI update
             yield await _sse_event("message_start", {
                 "conversation_id": str(conversation.id),
                 "message_id": str(ai_message_id),
                 "user_message_id": str(user_message.id),
             })
 
-            # Stream from LangGraph.
-            #
-            # Image generation is a long-running, non-streaming operation that
-            # can take 30-60+ seconds. During that time no graph events are
-            # emitted, leaving the SSE connection idle. Idle SSE connections get
-            # dropped by reverse proxies / load balancers, so the final result
-            # event never reaches the client ("goes to generating, no result").
-            #
-            # To prevent this we run the graph event loop in a background task
-            # and emit SSE heartbeat comments while waiting for the next event.
             generated_images: list[dict] = []
             stream_error = False
+            error_detail = ""
             event_queue: asyncio.Queue = asyncio.Queue()
             _SENTINEL = object()
 
@@ -308,8 +362,6 @@ async def chat_stream(
                     try:
                         item = await asyncio.wait_for(event_queue.get(), timeout=15.0)
                     except asyncio.TimeoutError:
-                        # SSE comment line — ignored by clients but keeps the
-                        # connection alive during long image generation.
                         yield ": heartbeat\n\n"
                         continue
 
@@ -321,21 +373,14 @@ async def chat_stream(
                     event = item
                     kind = event.get("event", "")
 
-                    # Stream tokens from LLM (text mode only)
                     if kind == "on_chat_model_stream" and not body.image_generation_mode:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and isinstance(chunk, AIMessageChunk):
-                            # ── Reasoning / thinking content ──────────────
-                            # OpenAI-compatible reasoning models stream their
-                            # chain-of-thought via a separate "reasoning_content"
-                            # field (DeepSeek, OpenRouter, Nemotron, etc.).
-                            # LangChain surfaces it on additional_kwargs.
                             reasoning_chunk = ""
                             additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
                             reasoning_chunk = additional_kwargs.get("reasoning_content", "") or ""
                             if not reasoning_chunk:
                                 reasoning_chunk = getattr(chunk, "reasoning_content", None) or ""
-                            # Some providers emit thinking as a typed content block
                             if not reasoning_chunk and isinstance(chunk.content, list):
                                 for block in chunk.content:
                                     if isinstance(block, dict) and block.get("type") in ("thinking", "reasoning"):
@@ -343,41 +388,29 @@ async def chat_stream(
 
                             if reasoning_chunk:
                                 full_thinking += reasoning_chunk
-                                yield await _sse_event("thinking", {
-                                    "content": reasoning_chunk,
-                                })
+                                yield await _sse_event("thinking", {"content": reasoning_chunk})
 
-                            # ── Normal answer text ────────────────────────
                             token = chunk.content
                             if isinstance(token, str):
                                 if token:
                                     full_response += token
-                                    yield await _sse_event("token", {
-                                        "content": token,
-                                    })
+                                    yield await _sse_event("token", {"content": token})
                             elif isinstance(token, list):
-                                # Multimodal / block content — extract text parts only
                                 text_parts = ""
                                 for block in token:
                                     if isinstance(block, dict) and block.get("type") == "text":
                                         text_parts += block.get("text", "")
                                 if text_parts:
                                     full_response += text_parts
-                                    yield await _sse_event("token", {
-                                        "content": text_parts,
-                                    })
+                                    yield await _sse_event("token", {"content": text_parts})
 
-                    # Node execution events
                     elif kind == "on_chain_start":
                         node_name = event.get("name", "")
                         if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
-                            # Emit a friendlier node name for image generation
                             display_name = "image_generator" if (
                                 node_name == "llm_caller" and body.image_generation_mode
                             ) else node_name
-                            yield await _sse_event("node_start", {
-                                "node": display_name,
-                            })
+                            yield await _sse_event("node_start", {"node": display_name})
 
                     elif kind == "on_chain_end":
                         node_name = event.get("name", "")
@@ -387,24 +420,24 @@ async def chat_stream(
                                 input_tokens = output.get("input_tokens", input_tokens)
                                 output_tokens = output.get("output_tokens", output_tokens)
 
-                                # Capture generated images
                                 if output.get("finish_reason") == "image_generated":
                                     generated_images = output.get("generated_image_assets", [])
 
                                 if output.get("finish_reason") == "error":
+                                    error_detail = output.get("error_message", "LLM call failed")
                                     yield await _sse_event("error", {
                                         "code": "llm_call_failed",
-                                        "message": output.get("error_message", "LLM call failed"),
-                                        "recoverable": False,
+                                        "message": error_detail,
+                                        "message_id": str(ai_message_id),
+                                        "recoverable": True,
                                     })
                                     stream_error = True
                                     break
+
                             display_name = "image_generator" if (
                                 node_name == "llm_caller" and body.image_generation_mode
                             ) else node_name
-                            yield await _sse_event("node_end", {
-                                "node": display_name,
-                            })
+                            yield await _sse_event("node_end", {"node": display_name})
             finally:
                 if not producer.done():
                     producer.cancel()
@@ -413,64 +446,68 @@ async def chat_stream(
                     except BaseException:
                         pass
 
-            # An error event was already emitted — skip persistence.
-            if stream_error:
-                return
-
             # Calculate latency
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
-            # Persist AI message
+            # ── Persist AI message result ────────────────────────────────────
             from app.core.database import get_db_context
             async with get_db_context() as save_db:
-                # Build content blocks for AI message
-                if generated_images:
-                    # Image generation response: intro text + image blocks
-                    img_count = len(generated_images)
-                    intro = f"Generated {img_count} image{'s' if img_count > 1 else ''} based on your prompt."
-                    ai_content: list[dict] = [{"type": "text", "text": intro}]
-                    for img in generated_images:
-                        ai_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": img["url"]},
-                            "asset_id": img["asset_id"],
-                        })
-                else:
-                    ai_content = []
-                    if full_thinking:
-                        ai_content.append({"type": "thinking", "text": full_thinking})
-                    ai_content.append({"type": "text", "text": full_response})
+                ai_msg = await save_db.get(Message, ai_message_id)
+                if ai_msg:
+                    if stream_error:
+                        # Mark as failed, store error details in content
+                        ai_msg.execution_status = "failed"
+                        ai_msg.content = [{
+                            "type": "error",
+                            "text": error_detail or "The model encountered an error generating a response.",
+                        }]
+                        ai_msg.latency_ms = latency_ms
+                    elif generated_images:
+                        img_count = len(generated_images)
+                        intro = f"Generated {img_count} image{'s' if img_count > 1 else ''} based on your prompt."
+                        ai_msg.content = [{"type": "text", "text": intro}]
+                        for img in generated_images:
+                            ai_msg.content.append({
+                                "type": "image_url",
+                                "image_url": {"url": img["url"]},
+                                "asset_id": img["asset_id"],
+                            })
+                        ai_msg.execution_status = "completed"
+                        ai_msg.input_tokens = input_tokens or None
+                        ai_msg.output_tokens = output_tokens or None
+                        ai_msg.latency_ms = latency_ms
+                    else:
+                        ai_content: list[dict] = []
+                        if full_thinking:
+                            ai_content.append({"type": "thinking", "text": full_thinking})
+                        ai_content.append({"type": "text", "text": full_response})
+                        ai_msg.content = ai_content
+                        ai_msg.execution_status = "completed"
+                        ai_msg.input_tokens = input_tokens or None
+                        ai_msg.output_tokens = output_tokens or None
+                        ai_msg.latency_ms = latency_ms
 
-                ai_message = Message(
-                    id=ai_message_id,
-                    conversation_id=conversation.id,
-                    parent_message_id=user_message.id,
-                    role="assistant",
-                    content=ai_content,
-                    model_id=graph_input["model_id"],
-                    input_tokens=input_tokens or None,
-                    output_tokens=output_tokens or None,
-                    latency_ms=latency_ms,
-                    sender_id=user_message.sender_id,
-                    hidden_from_owner=user_message.hidden_from_owner,
-                )
-                save_db.add(ai_message)
-
-                # Auto-generate a meaningful title on the first exchange
+                # Auto-generate conversation title on first exchange (only once)
                 generated_title: str | None = None
-                if len(history_messages) <= 1 and full_response:
+                if not stream_error and full_response:
                     conv = await save_db.get(Conversation, conversation.id)
-                    if conv and conv.title == "New Chat":
+                    if conv and conv.title == "New Chat" and not conv.title_generated:
                         from app.services.title_generator import generate_title
                         generated_title = await generate_title(
-                            user_message=body.message,
+                            user_message=user_message.text_content or body.message,
                             ai_response=full_response,
                             model_id=graph_input["model_id"],
                             user_id=str(user.id),
                         )
                         conv.title = generated_title
+                        conv.title_generated = True
 
-            # Send completion event
+            if stream_error:
+                # Error event already sent above; just notify done
+                yield await _sse_event("done", {"finish_reason": "error"})
+                return
+
+            # Send completion metadata
             meta_payload: dict = {
                 "message_id": str(ai_message_id),
                 "input_tokens": input_tokens,
@@ -484,7 +521,6 @@ async def chat_stream(
                 meta_payload["thinking"] = full_thinking
 
             yield await _sse_event("message_meta", meta_payload)
-            # Send title update if a new title was generated
             if generated_title:
                 yield await _sse_event("title_update", {
                     "conversation_id": str(conversation.id),
@@ -494,11 +530,25 @@ async def chat_stream(
 
         except Exception as e:
             logger.error("stream_error", error=str(e), conversation_id=str(conversation.id))
+            # Update AI message to failed state
+            try:
+                from app.core.database import get_db_context
+                async with get_db_context() as err_db:
+                    ai_msg = await err_db.get(Message, ai_message_id)
+                    if ai_msg and ai_msg.execution_status == "streaming":
+                        ai_msg.execution_status = "failed"
+                        ai_msg.content = [{"type": "error", "text": str(e)}]
+            except Exception:
+                pass
             yield await _sse_event("error", {
                 "code": "stream_error",
                 "message": str(e),
-                "recoverable": False,
+                "message_id": str(ai_message_id),
+                "recoverable": True,
             })
+            yield await _sse_event("done", {"finish_reason": "error"})
+        finally:
+            release_conversation_lock(conv_id_str)
 
     return StreamingResponse(
         event_generator(),
@@ -521,7 +571,6 @@ async def get_chat_history(
     from app.models.conversation_share import ConversationShare
     from sqlalchemy.orm import selectinload, joinedload
 
-    # Verify ownership or share access
     result = await db.execute(
         select(Conversation)
         .options(selectinload(Conversation.user))
@@ -554,25 +603,325 @@ async def get_chat_history(
     )
     messages = result.scalars().all()
 
-    return [
-        MessageResponse(
-            id=msg.id,
-            conversation_id=msg.conversation_id,
-            parent_message_id=msg.parent_message_id,
-            role=msg.role,
-            content=msg.content if isinstance(msg.content, list) else [msg.content],
-            model_id=msg.model_id,
-            input_tokens=msg.input_tokens,
-            output_tokens=msg.output_tokens,
-            latency_ms=msg.latency_ms,
-            is_active_branch=msg.is_active_branch,
-            created_at=msg.created_at,
-            sender_id=msg.sender_id,
-            sender_username=msg.sender.username if msg.sender else None,
-            hidden_from_owner=msg.hidden_from_owner,
+    return [_message_to_response(msg, msg.sender.username if msg.sender else None) for msg in messages]
+
+
+@router.post("/messages/{message_id}/edit")
+async def edit_message(
+    message_id: uuid.UUID,
+    body: MessageEditRequest,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit an existing user message, fork the conversation branch, and re-stream.
+
+    This implements non-destructive branching:
+    1. Deactivate all messages that came AFTER the edited message in the active branch
+    2. Create a new user message with the updated content (same parent_message_id)
+    3. Open an SSE stream for the new branch
+
+    Returns a streaming SSE response (same format as /chat/stream).
+    """
+    from sqlalchemy.orm import joinedload
+
+    # Load the target message
+    result = await db.execute(
+        select(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(
+            Message.id == message_id,
+            Message.role == "user",
+            Conversation.user_id == user.id,
         )
-        for msg in messages
-    ]
+    )
+    original_msg = result.scalar_one_or_none()
+    if not original_msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    conv_id = original_msg.conversation_id
+
+    # Load conversation
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id)
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Deactivate all messages after the original message's created_at in active branch
+    all_msgs_result = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv_id,
+            Message.is_active_branch == True,
+            Message.created_at >= original_msg.created_at,
+        )
+    )
+    msgs_to_deactivate = all_msgs_result.scalars().all()
+    for msg in msgs_to_deactivate:
+        msg.is_active_branch = False
+
+    await db.flush()
+
+    # Create new user message with updated content (fork point)
+    new_content_blocks = [{"type": "text", "text": body.message}]
+    new_user_msg = Message(
+        id=uuid.uuid4(),
+        conversation_id=conv_id,
+        parent_message_id=original_msg.parent_message_id,  # Same parent = sibling branch
+        role="user",
+        content=new_content_blocks,
+        sender_id=user.id,
+        hidden_from_owner=original_msg.hidden_from_owner,
+        execution_status="completed",
+        version=original_msg.version + 1,
+    )
+    db.add(new_user_msg)
+    await db.flush()
+
+    # Pre-create the AI placeholder
+    ai_message_id = uuid.uuid4()
+    model_id = body.model_id or conversation.model_id
+    ai_placeholder = Message(
+        id=ai_message_id,
+        conversation_id=conv_id,
+        parent_message_id=new_user_msg.id,
+        role="assistant",
+        content=[{"type": "text", "text": ""}],
+        model_id=model_id,
+        sender_id=user.id,
+        hidden_from_owner=original_msg.hidden_from_owner,
+        execution_status="streaming",
+        version=original_msg.version + 1,
+    )
+    db.add(ai_placeholder)
+    await db.flush()
+    await db.commit()
+
+    # Now delegate to the stream endpoint logic by constructing a ChatStreamRequest
+    # and calling it with the known leaf_user_message_id
+    settings = get_settings()
+    stream_request = ChatStreamRequest(
+        conversation_id=conv_id,
+        message=body.message,
+        model_id=body.model_id or conversation.model_id,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens,
+        leaf_user_message_id=new_user_msg.id,
+        media_asset_ids=body.media_asset_ids,
+    )
+
+    # Acquire lock
+    conv_id_str = str(conv_id)
+    if not await acquire_conversation_lock(conv_id_str):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="A response is already being generated for this conversation.",
+        )
+
+    # Re-use stream logic inline
+    async def edit_event_generator():
+        from app.core.database import get_db_context
+        graph = get_compiled_graph()
+        full_response = ""
+        full_thinking = ""
+        input_tokens = 0
+        output_tokens = 0
+        start_time = time.monotonic()
+
+        try:
+            yield await _sse_event("message_start", {
+                "conversation_id": str(conv_id),
+                "message_id": str(ai_message_id),
+                "user_message_id": str(new_user_msg.id),
+                "is_edit": True,
+                "original_message_id": str(message_id),
+            })
+
+            # Build history (active branch only, up to but not including new msgs)
+            async with get_db_context() as history_db:
+                hist_result = await history_db.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conv_id,
+                        Message.is_active_branch == True,
+                        Message.hidden_from_owner == False,
+                    )
+                    .order_by(Message.created_at)
+                )
+                history = hist_result.scalars().all()
+
+            lc_messages = []
+            for msg in history:
+                if msg.id in (ai_message_id,):
+                    continue
+                if msg.role == "user":
+                    lc_messages.append(HumanMessage(content=msg.text_content))
+                elif msg.role == "assistant" and msg.execution_status not in ("failed",) and msg.text_content:
+                    from langchain_core.messages import AIMessage
+                    lc_messages.append(AIMessage(content=msg.text_content))
+
+            graph_input = {
+                "messages": lc_messages,
+                "thread_id": str(conv_id),
+                "user_id": str(user.id),
+                "model_id": model_id or settings.DEFAULT_MODEL_ID,
+                "temperature": body.temperature if body.temperature is not None else settings.DEFAULT_TEMPERATURE,
+                "max_tokens": body.max_tokens or settings.DEFAULT_MAX_TOKENS,
+                "system_prompt": conversation.system_prompt or settings.DEFAULT_SYSTEM_PROMPT,
+                "retrieved_context": [],
+                "search_performed": False,
+                "media_refs": [],
+                "tool_calls": [],
+                "tool_results": [],
+                "needs_retrieval": False,
+                "needs_tool_use": False,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "finish_reason": "",
+                "error_message": "",
+                "error_raised": False,
+                "image_generation_mode": False,
+                "image_n": 1,
+                "generated_image_assets": [],
+            }
+
+            stream_error = False
+            error_detail = ""
+            event_queue: asyncio.Queue = asyncio.Queue()
+            _SENTINEL = object()
+
+            async def _produce():
+                try:
+                    async for ev in graph.astream_events(graph_input, version="v2"):
+                        await event_queue.put(ev)
+                except Exception as exc:
+                    await event_queue.put(exc)
+                finally:
+                    await event_queue.put(_SENTINEL)
+
+            producer = asyncio.create_task(_produce())
+
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(event_queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield ": heartbeat\n\n"
+                        continue
+
+                    if item is _SENTINEL:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+
+                    event = item
+                    kind = event.get("event", "")
+
+                    if kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and isinstance(chunk, AIMessageChunk):
+                            additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
+                            reasoning_chunk = additional_kwargs.get("reasoning_content", "") or ""
+                            if not reasoning_chunk:
+                                reasoning_chunk = getattr(chunk, "reasoning_content", None) or ""
+                            if reasoning_chunk:
+                                full_thinking += reasoning_chunk
+                                yield await _sse_event("thinking", {"content": reasoning_chunk})
+                            token = chunk.content
+                            if isinstance(token, str) and token:
+                                full_response += token
+                                yield await _sse_event("token", {"content": token})
+
+                    elif kind == "on_chain_start":
+                        node_name = event.get("name", "")
+                        if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
+                            yield await _sse_event("node_start", {"node": node_name})
+
+                    elif kind == "on_chain_end":
+                        node_name = event.get("name", "")
+                        output = event.get("data", {}).get("output", {})
+                        if node_name in ("input_validator", "prompt_builder", "llm_caller", "response_finalizer"):
+                            if isinstance(output, dict):
+                                input_tokens = output.get("input_tokens", input_tokens)
+                                output_tokens = output.get("output_tokens", output_tokens)
+                                if output.get("finish_reason") == "error":
+                                    error_detail = output.get("error_message", "LLM call failed")
+                                    yield await _sse_event("error", {
+                                        "code": "llm_call_failed",
+                                        "message": error_detail,
+                                        "message_id": str(ai_message_id),
+                                        "recoverable": True,
+                                    })
+                                    stream_error = True
+                                    break
+                            yield await _sse_event("node_end", {"node": node_name})
+            finally:
+                if not producer.done():
+                    producer.cancel()
+                    try:
+                        await producer
+                    except BaseException:
+                        pass
+
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+
+            async with get_db_context() as save_db:
+                ai_msg = await save_db.get(Message, ai_message_id)
+                if ai_msg:
+                    if stream_error:
+                        ai_msg.execution_status = "failed"
+                        ai_msg.content = [{"type": "error", "text": error_detail}]
+                    else:
+                        ai_content = []
+                        if full_thinking:
+                            ai_content.append({"type": "thinking", "text": full_thinking})
+                        ai_content.append({"type": "text", "text": full_response})
+                        ai_msg.content = ai_content
+                        ai_msg.execution_status = "completed"
+                        ai_msg.input_tokens = input_tokens or None
+                        ai_msg.output_tokens = output_tokens or None
+                        ai_msg.latency_ms = latency_ms
+
+            if not stream_error:
+                yield await _sse_event("message_meta", {
+                    "message_id": str(ai_message_id),
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "latency_ms": latency_ms,
+                    "model_id": model_id or settings.DEFAULT_MODEL_ID,
+                })
+            yield await _sse_event("done", {"finish_reason": "error" if stream_error else "stop"})
+
+        except Exception as e:
+            logger.error("edit_stream_error", error=str(e))
+            try:
+                async with get_db_context() as err_db:
+                    ai_msg = await err_db.get(Message, ai_message_id)
+                    if ai_msg and ai_msg.execution_status == "streaming":
+                        ai_msg.execution_status = "failed"
+                        ai_msg.content = [{"type": "error", "text": str(e)}]
+            except Exception:
+                pass
+            yield await _sse_event("error", {
+                "code": "stream_error",
+                "message": str(e),
+                "message_id": str(ai_message_id),
+                "recoverable": True,
+            })
+            yield await _sse_event("done", {"finish_reason": "error"})
+        finally:
+            release_conversation_lock(conv_id_str)
+
+    return StreamingResponse(
+        edit_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.patch("/messages/{message_id}/visibility", response_model=MessageResponse)
@@ -596,11 +945,9 @@ async def toggle_message_visibility(
             detail="Message not found or you are not authorized to modify it"
         )
 
-    # Toggle visibility
     new_visibility = not msg.hidden_from_owner
     msg.hidden_from_owner = new_visibility
 
-    # Also synchronize all child assistant responses (replies generated from this prompt)
     child_responses_result = await db.execute(
         select(Message)
         .where(
@@ -616,22 +963,7 @@ async def toggle_message_visibility(
     await db.commit()
     await db.refresh(msg, ["sender"])
 
-    return MessageResponse(
-        id=msg.id,
-        conversation_id=msg.conversation_id,
-        parent_message_id=msg.parent_message_id,
-        role=msg.role,
-        content=msg.content if isinstance(msg.content, list) else [msg.content],
-        model_id=msg.model_id,
-        input_tokens=msg.input_tokens,
-        output_tokens=msg.output_tokens,
-        latency_ms=msg.latency_ms,
-        is_active_branch=msg.is_active_branch,
-        created_at=msg.created_at,
-        sender_id=msg.sender_id,
-        sender_username=msg.sender.username if msg.sender else None,
-        hidden_from_owner=msg.hidden_from_owner,
-    )
+    return _message_to_response(msg, msg.sender.username if msg.sender else None)
 
 
 @router.delete("/message/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -651,3 +983,5 @@ async def delete_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     await db.delete(message)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

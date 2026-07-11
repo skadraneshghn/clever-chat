@@ -61,6 +61,11 @@ interface ChatState {
   // Image generation actions
   toggleImageGenerationMode: () => void;
   setImageCount: (count: 1 | 2 | 4) => void;
+  // Error recovery actions
+  /** Mark a streaming AI message as failed and show error recovery UI */
+  setMessageFailed: (messageId: string, errorText: string, conversationId: string) => void;
+  /** Duplicate an existing conversation into a new one */
+  duplicateConversation: (convId: string) => Promise<Conversation>;
 
   // Advanced File Manager state & actions
   files: any[];
@@ -238,12 +243,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       streamingContent: '',
       streamingThinking: '',
+      streamingMessageId: null,
       isStreaming: false,
       activeNodes: [],
       isNewChatMode: true,
       imageGenerationMode: false, // reset on new chat
       activeChatResourceIds: [], // Clear resource attachments for the chat
     });
+  },
+
+  setMessageFailed: (messageId, errorText, conversationId) => {
+    const failedMessage: Message = {
+      id: messageId,
+      conversation_id: conversationId,
+      parent_message_id: null,
+      role: 'assistant',
+      content: [{ type: 'error' as any, text: errorText }],
+      model_id: null,
+      input_tokens: null,
+      output_tokens: null,
+      latency_ms: null,
+      is_active_branch: true,
+      created_at: new Date().toISOString(),
+      sender_id: null,
+      sender_username: null,
+      hidden_from_owner: false,
+      execution_status: 'failed',
+    };
+    set((state) => ({
+      // Replace the streaming placeholder if it exists, otherwise append
+      messages: state.messages.some((m) => m.id === messageId)
+        ? state.messages.map((m) => m.id === messageId ? failedMessage : m)
+        : [...state.messages, failedMessage],
+      streamingContent: '',
+      streamingThinking: '',
+      streamingMessageId: null,
+      isStreaming: false,
+      activeNodes: [],
+    }));
+  },
+
+  duplicateConversation: async (convId) => {
+    const duplicated = await api.post<Conversation>(`/conversations/${convId}/duplicate`, {});
+    set((state) => ({
+      conversations: [duplicated, ...state.conversations],
+    }));
+    toast.success('Conversation duplicated!');
+    return duplicated;
   },
 
   toggleMessageVisibility: async (messageId) => {

@@ -53,6 +53,30 @@ class ConversationCreate(BaseModel):
     system_prompt: str | None = None
 
 
+class ConversationInitSchema(BaseModel):
+    """Payload for the instant /initialize endpoint."""
+    message: str
+    model_id: str = "gpt-4o"
+    system_prompt: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    media_asset_ids: list[uuid.UUID] = []
+    hidden_from_owner: bool = False
+    image_generation_mode: bool = False
+    image_n: int = Field(default=1, ge=1, le=4)
+
+
+class ConversationInitResponse(BaseModel):
+    """Minimal response from /initialize — enough for the client to redirect instantly."""
+    id: uuid.UUID
+    title: str
+    model_id: str
+    user_message_id: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ConversationUpdate(BaseModel):
     title: str | None = None
     model_id: str | None = None
@@ -114,8 +138,19 @@ class MessageResponse(BaseModel):
     sender_id: uuid.UUID | None = None
     sender_username: str | None = None
     hidden_from_owner: bool = False
+    execution_status: str = "completed"  # pending | streaming | completed | failed
+    version: int = 1
 
     model_config = {"from_attributes": True}
+
+
+class MessageEditRequest(BaseModel):
+    """Request body for editing an existing user message (creates a new branch)."""
+    message: str
+    model_id: str | None = None  # Override model for the re-run
+    media_asset_ids: list[uuid.UUID] = []
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class ChatStreamRequest(BaseModel):
@@ -126,6 +161,8 @@ class ChatStreamRequest(BaseModel):
     max_tokens: int | None = None
     system_prompt: str | None = None
     parent_message_id: uuid.UUID | None = None
+    # If set, this is a re-stream of an existing user message (edit/retry flow)
+    leaf_user_message_id: uuid.UUID | None = None
     media_asset_ids: list[uuid.UUID] = []
     hidden_from_owner: bool = False
     # Image generation

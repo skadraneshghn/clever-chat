@@ -13,7 +13,7 @@ import { useTheme } from 'next-themes';
 import MessageBubble from './MessageBubble';
 
 export default function MessageStream() {
-  const { messages, isStreaming, streamingContent, streamingThinking, activeNodes, imageGenerationMode } = useChatStore();
+  const { messages, isStreaming, streamingContent, streamingThinking, streamingMessageId, activeNodes, imageGenerationMode } = useChatStore();
   const { preferences } = usePreferencesStore();
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -136,7 +136,7 @@ export default function MessageStream() {
             <MessageBubble
               key="streaming"
               message={{
-                id: 'streaming',
+                id: streamingMessageId || 'streaming',
                 conversation_id: '',
                 parent_message_id: null,
                 role: 'assistant',
@@ -150,6 +150,7 @@ export default function MessageStream() {
                 sender_id: null,
                 sender_username: null,
                 hidden_from_owner: false,
+                execution_status: 'streaming',
               }}
               isStreaming={true}
               streamingContent={streamingContent}

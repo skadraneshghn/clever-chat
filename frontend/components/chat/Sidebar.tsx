@@ -48,7 +48,8 @@ export default function Sidebar() {
   const {
     conversations, fetchConversations, activeConversationId,
     setActiveConversation, deleteConversation, resetChat,
-    shareConversationPrivate, unshareConversationPrivate, fetchConversationShares
+    shareConversationPrivate, unshareConversationPrivate, fetchConversationShares,
+    duplicateConversation,
   } = useChatStore();
   const { user, logout } = useAuthStore();
   const { sidebarOpen, setSidebarOpen, isMobile, setMobileDrawerOpen } = useUIStore();
@@ -107,6 +108,17 @@ export default function Sidebar() {
     if (isActive) {
       resetChat();
       router.push('/');
+    }
+  }
+
+  async function handleDuplicate(id: string) {
+    try {
+      const newConv = await duplicateConversation(id);
+      setActiveMenuId(null);
+      router.push(`/${newConv.id}`);
+    } catch (err) {
+      console.error('Failed to duplicate conversation:', err);
+      toast.error('Failed to duplicate conversation');
     }
   }
 
@@ -448,16 +460,49 @@ export default function Sidebar() {
                             <span>Pin chat</span>
                           </button>
                           <button
-                            disabled
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await handleDuplicate(conv.id);
+                            }}
                             style={{
                               display: 'flex', alignItems: 'center', gap: 10,
                               padding: '6px 10px', fontSize: 13, border: 'none',
-                              background: 'transparent', color: 'var(--text-muted)',
-                              textAlign: 'left', cursor: 'not-allowed', width: '100%',
+                              background: 'transparent', color: 'var(--text-secondary)',
+                              textAlign: 'left', cursor: 'pointer', width: '100%',
+                              borderRadius: 'var(--radius-md)',
+                              transition: 'all var(--transition-fast)',
                             }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                           >
                             <Archive size={14} />
-                            <span>Archive</span>
+                            <span>Duplicate</span>
+                          </button>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(null);
+                              try {
+                                await api.patch(`/conversations/${conv.id}`, { is_archived: !conv.is_archived });
+                                fetchConversations();
+                                toast.success(conv.is_archived ? 'Conversation unarchived' : 'Conversation archived');
+                              } catch {
+                                toast.error('Failed to update conversation');
+                              }
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10,
+                              padding: '6px 10px', fontSize: 13, border: 'none',
+                              background: 'transparent', color: 'var(--text-secondary)',
+                              textAlign: 'left', cursor: 'pointer', width: '100%',
+                              borderRadius: 'var(--radius-md)',
+                              transition: 'all var(--transition-fast)',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-1)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <Archive size={14} />
+                            <span>{conv.is_archived ? 'Unarchive' : 'Archive'}</span>
                           </button>
                           <button
                             onClick={async (e) => {
